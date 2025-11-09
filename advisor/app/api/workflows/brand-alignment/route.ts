@@ -13,6 +13,7 @@ const workflowInputSchema = z.object({
   brandLogoBase64: z.string().min(1, "brandLogoBase64 is required"),
   productImageBase64: z.string().optional(),
   brandContext: brandContextSchema,
+  originalPrompt: z.string().optional(),
 });
 
 const stepOutputSchema = z.object({
@@ -64,6 +65,7 @@ const aggregationAfterParallelSchema = z.object({
   "overall-critic": stepOutputSchema,
   "visual-style": stepOutputSchema,
   "frame-extraction": frameExtractionOutputSchema,
+  "audio-analysis": stepOutputSchema,
   brandContext: brandContextSchema,
   brandLogoBase64: z.string().min(1),
 });
@@ -100,6 +102,154 @@ const backendBaseUrl =
   process.env.BACKEND_BASE_URL ??
   process.env.NEXT_PUBLIC_BACKEND_URL ??
   "http://127.0.0.1:8000";
+
+const safetyEthicsStep = createStep({
+  id: "safety-ethics",
+  description: "Gemini safety and ethics agent",
+  inputSchema: workflowInputSchema,
+  outputSchema: stepOutputSchema,
+  execute: async ({ inputData }) => {
+    const response = await fetch(`${backendBaseUrl}/agents/safety-ethics`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        videoBase64: inputData.videoBase64,
+        brandContext: inputData.brandContext,
+      }),
+    });
+
+    if (!response.ok) {
+      let message = "Failed to execute safety and ethics agent";
+      try {
+        const errorPayload = await response.json();
+        message =
+          errorPayload?.detail ??
+          errorPayload?.error ??
+          response.statusText ??
+          message;
+      } catch (error) {
+        console.error("Failed to parse agent error payload", error);
+      }
+      throw new Error(message);
+    }
+
+    const payload = await response.json();
+
+    return {
+      report: payload.report ?? payload,
+      prompt: payload.prompt ?? "",
+      warnings: payload.warnings ?? [],
+    };
+  },
+});
+
+const messageClarityStep = createStep({
+  id: "message-clarity",
+  description: "Gemini message clarity agent",
+  inputSchema: workflowInputSchema,
+  outputSchema: stepOutputSchema,
+  execute: async ({ inputData }) => {
+    const response = await fetch(`${backendBaseUrl}/agents/message-clarity`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        videoBase64: inputData.videoBase64,
+        brandContext: inputData.brandContext,
+      }),
+    });
+
+    if (!response.ok) {
+      let message = "Failed to execute message clarity agent";
+      try {
+        const errorPayload = await response.json();
+        message =
+          errorPayload?.detail ??
+          errorPayload?.error ??
+          response.statusText ??
+          message;
+      } catch (error) {
+        console.error("Failed to parse agent error payload", error);
+      }
+      throw new Error(message);
+    }
+
+    const payload = await response.json();
+
+    return {
+      report: payload.report ?? payload,
+      prompt: payload.prompt ?? "",
+      warnings: payload.warnings ?? [],
+    };
+  },
+});
+
+const advisorInputSchema = z.object({
+  "overall-critic": stepOutputSchema,
+  "visual-style": stepOutputSchema,
+  "frame-extraction": frameExtractionOutputSchema,
+  "audio-analysis": stepOutputSchema,
+  "logo-detection": logoDetectionOutputSchema,
+  "color-harmony": colorHarmonyOutputSchema,
+  "synthesizer": stepOutputSchema,
+  "safety-ethics": stepOutputSchema,
+  "message-clarity": stepOutputSchema,
+  brandContext: brandContextSchema,
+  brandLogoBase64: z.string().min(1),
+  originalPrompt: z.string().optional(),
+});
+
+const advisorStep = createStep({
+  id: "advisor",
+  description: "AdVisor agent that aggregates all analysis results",
+  inputSchema: advisorInputSchema,
+  outputSchema: stepOutputSchema.extend({
+    validationPrompt: z.string(),
+  }),
+  execute: async ({ inputData }) => {
+    const response = await fetch(`${backendBaseUrl}/agents/advisor`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        brandAlignmentReport: inputData["overall-critic"]?.report ?? {},
+        synthesizerReport: inputData["synthesizer"]?.report ?? {},
+        safetyEthicsReport: inputData["safety-ethics"]?.report ?? {},
+        messageClarityReport: inputData["message-clarity"]?.report ?? {},
+        brandContext: inputData.brandContext,
+        originalPrompt: inputData.originalPrompt,
+      }),
+    });
+
+    if (!response.ok) {
+      let message = "Failed to execute advisor agent";
+      try {
+        const errorPayload = await response.json();
+        message =
+          errorPayload?.detail ??
+          errorPayload?.error ??
+          response.statusText ??
+          message;
+      } catch (error) {
+        console.error("Failed to parse agent error payload", error);
+      }
+      throw new Error(message);
+    }
+
+    const payload = await response.json();
+
+    return {
+      report: payload.report ?? payload,
+      prompt: payload.prompt ?? "",
+      validationPrompt: payload.validationPrompt ?? "",
+      warnings: payload.warnings ?? [],
+    };
+  },
+});
 
 const overallCriticStep = createStep({
   id: "overall-critic",
@@ -476,6 +626,7 @@ const synthesizerStep = createStep({
       body: JSON.stringify({
         overallReport: inputData["overall-critic"].report,
         visualReport: inputData["visual-style"].report,
+        audioReport: inputData["audio-analysis"]?.report,
         brandContext: inputData.brandContext,
       }),
     });
@@ -505,36 +656,103 @@ const synthesizerStep = createStep({
   },
 });
 
+const audioAnalysisStep = createStep({
+  id: "audio-analysis",
+  description: "Gemini audio analysis agent",
+  inputSchema: workflowInputSchema,
+  outputSchema: stepOutputSchema,
+  execute: async ({ inputData }) => {
+    const response = await fetch(`${backendBaseUrl}/agents/audio-analysis`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        videoBase64: inputData.videoBase64,
+        brandContext: inputData.brandContext,
+      }),
+    });
+
+    if (!response.ok) {
+      let message = "Failed to execute audio analysis agent";
+      try {
+        const errorPayload = await response.json();
+        message =
+          errorPayload?.detail ??
+          errorPayload?.error ??
+          response.statusText ??
+          message;
+      } catch (error) {
+        console.error("Failed to parse agent error payload", error);
+      }
+      throw new Error(message);
+    }
+
+    const payload = await response.json();
+
+    return {
+      report: payload.report ?? payload,
+      prompt: payload.prompt ?? "",
+      warnings: payload.warnings ?? [],
+    };
+  },
+});
+
 const brandAlignmentWorkflow = createWorkflow({
   id: "brand-alignment",
   description: "Brand alignment critique workflow",
   inputSchema: workflowInputSchema,
-  outputSchema: stepOutputSchema,
+  outputSchema: stepOutputSchema.extend({
+    validationPrompt: z.string().optional(),
+  }),
 })
-  .parallel([overallCriticStep, visualStyleStep, frameExtractionStep])
+  .parallel([
+    overallCriticStep,
+    visualStyleStep,
+    frameExtractionStep,
+    audioAnalysisStep,
+    safetyEthicsStep,
+    messageClarityStep,
+  ])
   .map(async ({ getStepResult, getInitData }) => {
     const overallCriticResult = await getStepResult("overall-critic");
     const visualStyleResult = await getStepResult("visual-style");
     const frameExtractionResult = await getStepResult("frame-extraction");
+    const audioAnalysisResult = await getStepResult("audio-analysis");
+    const safetyEthicsResult = await getStepResult("safety-ethics");
+    const messageClarityResult = await getStepResult("message-clarity");
     const initialData = getInitData();
 
     return {
       "overall-critic": overallCriticResult,
       "visual-style": visualStyleResult,
       "frame-extraction": frameExtractionResult,
+      "audio-analysis": audioAnalysisResult,
+      "safety-ethics": safetyEthicsResult,
+      "message-clarity": messageClarityResult,
       brandContext: initialData.brandContext,
       brandLogoBase64: initialData.brandLogoBase64,
     };
   })
   .then(logoDetectionStep)
   .map(async ({ getStepResult, getInitData }) => {
-    const [overallCriticResult, visualStyleResult, frameExtractionResult, logoDetectionResult] =
-      await Promise.all([
-        getStepResult("overall-critic"),
-        getStepResult("visual-style"),
-        getStepResult("frame-extraction"),
-        getStepResult("logo-detection"),
-      ]);
+    const [
+      overallCriticResult,
+      visualStyleResult,
+      frameExtractionResult,
+      audioAnalysisResult,
+      safetyEthicsResult,
+      messageClarityResult,
+      logoDetectionResult,
+    ] = await Promise.all([
+      getStepResult("overall-critic"),
+      getStepResult("visual-style"),
+      getStepResult("frame-extraction"),
+      getStepResult("audio-analysis"),
+      getStepResult("safety-ethics"),
+      getStepResult("message-clarity"),
+      getStepResult("logo-detection"),
+    ]);
 
     const initialData = getInitData();
 
@@ -542,6 +760,9 @@ const brandAlignmentWorkflow = createWorkflow({
       "overall-critic": overallCriticResult,
       "visual-style": visualStyleResult,
       "frame-extraction": frameExtractionResult,
+      "audio-analysis": audioAnalysisResult,
+      "safety-ethics": safetyEthicsResult,
+      "message-clarity": messageClarityResult,
       "logo-detection": logoDetectionResult,
       brandContext: initialData.brandContext,
       brandLogoBase64: initialData.brandLogoBase64,
@@ -554,12 +775,18 @@ const brandAlignmentWorkflow = createWorkflow({
       overallCriticResult,
       visualStyleResult,
       frameExtractionResult,
+      audioAnalysisResult,
+      safetyEthicsResult,
+      messageClarityResult,
       logoDetectionResult,
       colorHarmonyResult,
     ] = await Promise.all([
       getStepResult("overall-critic"),
       getStepResult("visual-style"),
       getStepResult("frame-extraction"),
+      getStepResult("audio-analysis"),
+      getStepResult("safety-ethics"),
+      getStepResult("message-clarity"),
       getStepResult("logo-detection"),
       getStepResult("color-harmony"),
     ]);
@@ -570,6 +797,9 @@ const brandAlignmentWorkflow = createWorkflow({
       "overall-critic": overallCriticResult,
       "visual-style": visualStyleResult,
       "frame-extraction": frameExtractionResult,
+      "audio-analysis": audioAnalysisResult,
+      "safety-ethics": safetyEthicsResult,
+      "message-clarity": messageClarityResult,
       "logo-detection": logoDetectionResult,
       "color-harmony": colorHarmonyResult,
       brandContext: initialData.brandContext,
@@ -577,6 +807,47 @@ const brandAlignmentWorkflow = createWorkflow({
     };
   })
   .then(synthesizerStep)
+  .map(async ({ getStepResult, getInitData }) => {
+    const [
+      overallCriticResult,
+      visualStyleResult,
+      frameExtractionResult,
+      audioAnalysisResult,
+      safetyEthicsResult,
+      messageClarityResult,
+      logoDetectionResult,
+      colorHarmonyResult,
+      synthesizerResult,
+    ] = await Promise.all([
+      getStepResult("overall-critic"),
+      getStepResult("visual-style"),
+      getStepResult("frame-extraction"),
+      getStepResult("audio-analysis"),
+      getStepResult("safety-ethics"),
+      getStepResult("message-clarity"),
+      getStepResult("logo-detection"),
+      getStepResult("color-harmony"),
+      getStepResult("synthesizer"),
+    ]);
+
+    const initialData = getInitData();
+
+    return {
+      "overall-critic": overallCriticResult,
+      "visual-style": visualStyleResult,
+      "frame-extraction": frameExtractionResult,
+      "audio-analysis": audioAnalysisResult,
+      "safety-ethics": safetyEthicsResult,
+      "message-clarity": messageClarityResult,
+      "logo-detection": logoDetectionResult,
+      "color-harmony": colorHarmonyResult,
+      "synthesizer": synthesizerResult,
+      brandContext: initialData.brandContext,
+      brandLogoBase64: initialData.brandLogoBase64,
+      originalPrompt: initialData.originalPrompt,
+    };
+  })
+  .then(advisorStep)
   .commit();
 
 // Helper to format step data
@@ -601,7 +872,9 @@ function formatStep(
     (id === "overall-critic" ||
       id === "visual-style" ||
       id === "frame-extraction" ||
-      id === "logo-detection")
+      id === "logo-detection" ||
+      id === "safety-ethics" ||
+      id === "message-clarity")
   ) {
     payload = validationData;
   }
@@ -613,6 +886,16 @@ function formatStep(
     payload = {
       brandContext: validationData.brandContext,
       combinedFrom: ["overall-critic", "visual-style", "logo-detection"],
+    };
+  }
+  if (
+    !payload &&
+    id === "advisor" &&
+    validationData
+  ) {
+    payload = {
+      brandContext: validationData.brandContext,
+      combinedFrom: ["synthesizer", "safety-ethics", "message-clarity"],
     };
   }
 

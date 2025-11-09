@@ -20,7 +20,7 @@ from ..services.gemini import get_genai_client
 logger = logging.getLogger(__name__)
 
 
-USE_DUMMY_SYNTHESIZER = os.getenv("USE_DUMMY_SYNTHESIZER", "true").lower() in {
+USE_DUMMY_SYNTHESIZER = os.getenv("USE_DUMMY_SYNTHESIZER", "false").lower() in {
     "1",
     "true",
     "yes",
@@ -92,10 +92,19 @@ def _build_prompt(request: SynthesizerRequest) -> str:
 
     overall_report_str = json.dumps(request.overall_report, indent=2)
     visual_report_str = json.dumps(request.visual_report, indent=2)
+    audio_report_str = json.dumps(request.audio_report, indent=2) if request.audio_report else None
+
+    agents_summary = "Two upstream agents" if not audio_report_str else "Three upstream agents"
+    audio_section = ""
+    if audio_report_str:
+        audio_section = (
+            "\n\n3. AUDIO ANALYSIS REPORT:\n"
+            f"{audio_report_str}\n"
+        )
 
     return (
         "You are the Synthesizer agent in a multi-agent brand quality workflow. "
-        "Two upstream agents have evaluated an advertisement. Aggregate their "
+        f"{agents_summary} have evaluated an advertisement. Aggregate their "
         "insights into a cohesive, human-readable critique that a brand lead can "
         "use directly.\n\n"
         f"Brand Context:\n- Company: {company}\n- Product: {product}\n"
@@ -103,7 +112,7 @@ def _build_prompt(request: SynthesizerRequest) -> str:
         "Overall Critic Agent Report (JSON):\n"
         f"{overall_report_str}\n\n"
         "Visual Style Agent Report (JSON):\n"
-        f"{visual_report_str}\n\n"
+        f"{visual_report_str}\n{audio_section}"
         "Return a JSON object with the following structure:\n"
         "{\n"
         '  "combinedSummary": string,\n'

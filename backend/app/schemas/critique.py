@@ -107,11 +107,13 @@ class SynthesizerRequest(BaseModel):
     Attributes:
         overall_report: Output report from the overall critic agent.
         visual_report: Output report from the visual style agent.
+        audio_report: Optional output report from the audio analysis agent.
         brand_context: Brand information to provide context while synthesizing.
     """
 
     overall_report: Dict[str, Any] = Field(..., alias="overallReport")
     visual_report: Dict[str, Any] = Field(..., alias="visualReport")
+    audio_report: Optional[Dict[str, Any]] = Field(None, alias="audioReport")
     brand_context: BrandContext = Field(..., alias="brandContext")
 
     class Config:
@@ -291,6 +293,168 @@ class ColorHarmonyResult(BaseModel):
     color_alignment_score: float = Field(..., alias="colorAlignmentScore")  # 0-1
     analysis: str
     recommendations: List[str] = Field(default_factory=list)
+    warnings: List[str] = Field(default_factory=list)
+    
+    class Config:
+        populate_by_name = True
+
+
+class AudioAnalysisRequest(BaseModel):
+    """
+    Request payload expected by the audio analysis agent.
+    
+    Attributes:
+        video_base64: Base64-encoded content of the generated advertisement
+            video. Data-URI prefixes are accepted and will be stripped
+            automatically prior to processing.
+        brand_context: Additional brand information to help the agent evaluate
+            audio alignment.
+    """
+    
+    video_base64: str = Field(..., alias="videoBase64")
+    brand_context: BrandContext = Field(..., alias="brandContext")
+    
+    class Config:
+        populate_by_name = True
+    
+    @validator("video_base64")
+    def validate_video(cls, value: str) -> str:
+        if not value:
+            raise ValueError("video_base64 must not be empty")
+        if len(value) < 100:
+            raise ValueError("video_base64 payload appears to be too small")
+        return value
+
+
+class AudioAnalysisResult(BaseModel):
+    """Structured result from the audio analysis agent."""
+    
+    report: Dict[str, Any] = Field(
+        ...,
+        description="Structured audio analysis report with tone, music, sound effects, and quality scores",
+    )
+    prompt: str = Field(..., description="The prompt that was sent to Gemini")
+    warnings: List[str] = Field(
+        default_factory=list,
+        description="Any warnings encountered during processing",
+    )
+    raw_text: Optional[str] = Field(
+        None,
+        description="Raw text response from Gemini if JSON parsing failed",
+    )
+    
+    class Config:
+        populate_by_name = True
+
+
+class SafetyEthicsRequest(BaseModel):
+    """
+    Request payload expected by the safety and ethics agent.
+    
+    Attributes:
+        video_base64: Base64-encoded content of the generated advertisement
+            video. Data-URI prefixes are accepted and will be stripped
+            automatically prior to processing.
+        brand_context: Additional brand information to help the agent evaluate
+            safety and ethics.
+    """
+    
+    video_base64: str = Field(..., alias="videoBase64")
+    brand_context: BrandContext = Field(..., alias="brandContext")
+    
+    class Config:
+        populate_by_name = True
+    
+    @validator("video_base64")
+    def validate_video(cls, value: str) -> str:
+        if not value:
+            raise ValueError("video_base64 must not be empty")
+        if len(value) < 100:
+            raise ValueError("video_base64 payload appears to be too small")
+        return value
+
+
+class SafetyEthicsResult(BaseModel):
+    """Structured result returned by the safety and ethics agent."""
+    
+    report: Dict[str, Any]
+    prompt: str
+    warnings: List[str] = Field(default_factory=list)
+    raw_text: Optional[str] = Field(None, alias="rawText")
+    
+    class Config:
+        populate_by_name = True
+
+
+class MessageClarityRequest(BaseModel):
+    """
+    Request payload expected by the message clarity agent.
+    
+    Attributes:
+        video_base64: Base64-encoded content of the generated advertisement
+            video. Data-URI prefixes are accepted and will be stripped
+            automatically prior to processing.
+        brand_context: Additional brand information to help the agent evaluate
+            message clarity.
+    """
+    
+    video_base64: str = Field(..., alias="videoBase64")
+    brand_context: BrandContext = Field(..., alias="brandContext")
+    
+    class Config:
+        populate_by_name = True
+    
+    @validator("video_base64")
+    def validate_video(cls, value: str) -> str:
+        if not value:
+            raise ValueError("video_base64 must not be empty")
+        if len(value) < 100:
+            raise ValueError("video_base64 payload appears to be too small")
+        return value
+
+
+class MessageClarityResult(BaseModel):
+    """Structured result returned by the message clarity agent."""
+    
+    report: Dict[str, Any]
+    prompt: str
+    warnings: List[str] = Field(default_factory=list)
+    raw_text: Optional[str] = Field(None, alias="rawText")
+    
+    class Config:
+        populate_by_name = True
+
+
+class AdvisorRequest(BaseModel):
+    """
+    Request payload for the advisor agent that aggregates all analysis results.
+    
+    Attributes:
+        brand_alignment_report: Report from brand alignment workflow/synthesizer
+        safety_ethics_report: Report from safety and ethics agent
+        message_clarity_report: Report from message clarity agent
+        synthesizer_report: Report from synthesizer agent
+        brand_context: Brand information for context
+        original_prompt: Original prompt used to generate the video
+    """
+    
+    brand_alignment_report: Dict[str, Any] = Field(..., alias="brandAlignmentReport")
+    safety_ethics_report: Dict[str, Any] = Field(..., alias="safetyEthicsReport")
+    message_clarity_report: Dict[str, Any] = Field(..., alias="messageClarityReport")
+    synthesizer_report: Dict[str, Any] = Field(..., alias="synthesizerReport")
+    brand_context: BrandContext = Field(..., alias="brandContext")
+    original_prompt: Optional[str] = Field(None, alias="originalPrompt")
+    
+    class Config:
+        populate_by_name = True
+
+
+class AdvisorResult(BaseModel):
+    """Structured result returned by the advisor agent."""
+    
+    report: Dict[str, Any]
+    prompt: str
+    validation_prompt: str = Field(..., alias="validationPrompt")  # Prompt to append to original
     warnings: List[str] = Field(default_factory=list)
     
     class Config:

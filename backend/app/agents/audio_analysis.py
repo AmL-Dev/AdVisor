@@ -1,8 +1,8 @@
 """
-Implementation of the overall critic agent.
+Audio analysis agent.
 
-The agent accepts a short video and brand context, prompts Gemini to perform a
-high-level critique, and returns the structured JSON response.
+The agent analyzes the audio track of an advertisement video using Gemini with audio input.
+It assesses tone of voice, music, sound effects, and overall audio quality for brand alignment.
 """
 
 from __future__ import annotations
@@ -18,13 +18,13 @@ from typing import Any, Dict, List, Tuple
 
 from google.genai.types import GenerateContentResponse
 
-from ..schemas.critique import OverallCriticRequest, OverallCriticResult
+from ..schemas.critique import AudioAnalysisRequest, AudioAnalysisResult
 from ..services.gemini import get_genai_client
 
 logger = logging.getLogger(__name__)
 
 
-USE_DUMMY_OVERALL_CRITIC = os.getenv("USE_DUMMY_OVERALL_CRITIC", "false").lower() in {
+USE_DUMMY_AUDIO_ANALYSIS = os.getenv("USE_DUMMY_AUDIO_ANALYSIS", "false").lower() in {
     "1",
     "true",
     "yes",
@@ -37,27 +37,21 @@ DATA_URI_PATTERN = re.compile(r"^data:.+;base64,")
 
 def _strip_data_uri_prefix(data: str) -> str:
     """Remove data URI prefixes so the payload can be decoded."""
-
     return DATA_URI_PATTERN.sub("", data)
 
 
 def _decode_base64(data: str) -> bytes:
     """Decode base64 data and raise a helpful error if it fails."""
-
     try:
         return base64.b64decode(data, validate=True)
-    except Exception as exc:  # noqa: BLE001 - broad capture for clarity
+    except Exception as exc:  # noqa: BLE001
         raise ValueError("Invalid base64 payload provided for video") from exc
 
 
 def _extract_response_text(response: GenerateContentResponse) -> str:
     """
     Attempt to extract the textual payload from a Gemini response.
-
-    The SDK can return data in multiple shapes. This helper tries the most
-    common paths and concatenates multiple parts when present.
     """
-
     if getattr(response, "text", None):
         return response.text  # type: ignore[return-value]
 
@@ -77,7 +71,6 @@ def _parse_json_payload(text: str) -> Tuple[Dict[str, Any], List[str]]:
     """
     Parse JSON from the Gemini response. Returns the parsed dict and warnings.
     """
-
     warnings: List[str] = []
     cleaned = text.strip()
 
@@ -106,9 +99,8 @@ def _parse_json_payload(text: str) -> Tuple[Dict[str, Any], List[str]]:
         return {"rawText": cleaned}, warnings
 
 
-def _build_prompt(request: OverallCriticRequest) -> str:
+def _build_prompt(request: AudioAnalysisRequest) -> str:
     """Create the system prompt sent to Gemini."""
-
     context = request.brand_context
     brief = (
         f"\n- Creative Brief: {context.brief_prompt}"
@@ -117,86 +109,67 @@ def _build_prompt(request: OverallCriticRequest) -> str:
     )
 
     return (
-        "You are a senior brand quality evaluator tasked with assessing an AI-"
-        "generated advertisement.\n\n"
+        "You are an audio analysis expert for brand advertisement evaluation.\n\n"
         "BRAND CONTEXT:\n"
         f"- Company: {context.company_name}\n"
         f"- Product: {context.product_name}{brief}\n\n"
-        "Please review the provided video and respond with JSON using the "
+        "Please analyze the audio track of the provided video and respond with JSON using the "
         "following schema:\n"
         "{\n"
-        '  "brandAlignment": {\n'
+        '  "toneOfVoice": {\n'
         '    "score": 0.0-1.0,\n'
         '    "analysis": "string",\n'
-        '    "observations": ["string"]\n'
+        '    "characteristics": ["string"],\n'
+        '    "brandAlignment": "string"\n'
         "  },\n"
-        '  "visualQuality": {\n'
+        '  "music": {\n'
         '    "score": 0.0-1.0,\n'
         '    "analysis": "string",\n'
-        '    "issues": ["string"]\n'
+        '    "style": "string",\n'
+        '    "volume": "string",\n'
+        '    "brandAlignment": "string"\n'
         "  },\n"
-        '  "toneAccuracy": {\n'
+        '  "soundEffects": {\n'
         '    "score": 0.0-1.0,\n'
         '    "analysis": "string",\n'
-        '    "observations": ["string"]\n'
+        '    "presence": "string",\n'
+        '    "quality": "string"\n'
         "  },\n"
-        '  "violations": ["string"],\n'
-        '  "offBrandElements": ["string"],\n'
-        '  "overallImpression": "string",\n'
+        '  "audioQuality": {\n'
+        '    "score": 0.0-1.0,\n'
+        '    "analysis": "string",\n'
+        '    "clarity": "string",\n'
+        '    "balance": "string"\n'
+        "  },\n"
+        '  "overallAudioScore": 0.0-1.0,\n'
         '  "keyStrengths": ["string"],\n'
-        '  "keyWeaknesses": ["string"]\n'
+        '  "keyWeaknesses": ["string"],\n'
+        '  "recommendations": ["string"]\n'
         "}\n\n"
-        "Provide thoughtful commentary and make sure all scores fall between 0 "
-        "and 1. Return JSON only."
+        "Focus on:\n"
+        "1. How well the tone of voice matches the brand identity\n"
+        "2. Whether the music style and mood align with brand values\n"
+        "3. Quality and appropriateness of sound effects\n"
+        "4. Overall audio production quality\n"
+        "5. Brand alignment of all audio elements\n\n"
+        "Provide thoughtful commentary and make sure all scores fall between 0 and 1."
     )
 
 
-def _wait_for_file_active(client, file_obj, max_wait_seconds: int = 120) -> None:
-    """
-    Wait for an uploaded file to become ACTIVE before using it.
-    
-    Args:
-        client: Google GenAI client instance
-        file_obj: File object returned from upload
-        max_wait_seconds: Maximum time to wait in seconds
-        
-    Raises:
-        TimeoutError: If file doesn't become ACTIVE within max_wait_seconds
-    """
+def _wait_for_file_ready(
+    client,
+    uploaded_file,
+    max_wait_seconds: int = 300,
+    poll_interval: int = 2,
+) -> None:
+    """Wait for an uploaded file to become ACTIVE/ready for use."""
     start_time = time.time()
-    poll_interval = 2  # Check every 2 seconds
-    
-    # Get file name (the get() method uses 'name' parameter, format: "files/...")
-    file_name = None
-    if hasattr(file_obj, "name"):
-        file_name = file_obj.name
-        # Ensure it starts with "files/" if it's just an ID
-        if not file_name.startswith("files/"):
-            file_name = f"files/{file_name}"
-    elif hasattr(file_obj, "uri"):
-        # Extract name from URI if needed
-        uri = file_obj.uri
-        if "/files/" in uri:
-            file_name = uri.split("/files/")[-1]
-            if not file_name.startswith("files/"):
-                file_name = f"files/{file_name}"
-        else:
-            file_name = uri
-    
-    if not file_name:
-        logger.warning("Could not determine file name from file object, skipping wait check")
-        # Give it a short delay anyway
-        time.sleep(3)
-        return
-    
-    logger.info("Waiting for file %s to become ACTIVE...", file_name)
+    file_name = uploaded_file.name if hasattr(uploaded_file, "name") else str(uploaded_file.uri).split("/")[-1]
     
     while time.time() - start_time < max_wait_seconds:
         try:
-            # Get current file status using 'name' parameter
             file_info = client.files.get(name=file_name)
             
-            # Check for state in various possible locations
             state = None
             
             # Try direct attribute access
@@ -240,72 +213,80 @@ def _wait_for_file_active(client, file_obj, max_wait_seconds: int = 120) -> None
     )
 
 
-def run_overall_critic(request: OverallCriticRequest) -> OverallCriticResult:
-    """Execute the overall critic agent and return a structured result."""
-
-    if USE_DUMMY_OVERALL_CRITIC:
+def run_audio_analysis(request: AudioAnalysisRequest) -> AudioAnalysisResult:
+    """Execute the audio analysis agent and return a structured result."""
+    
+    if USE_DUMMY_AUDIO_ANALYSIS:
         brand = request.brand_context
         brand_description = f"{brand.company_name}'s {brand.product_name}".strip()
-
+        
         report = {
-            "brandAlignment": {
+            "toneOfVoice": {
                 "score": 0.5,
-                "analysis": f"Placeholder evaluation generated for {brand_description}.",
-                "observations": [
-                    "Dummy mode active – real Gemini analysis skipped to save credits.",
-                ],
+                "analysis": f"Placeholder tone of voice evaluation for {brand_description}.",
+                "characteristics": ["Dummy mode active"],
+                "brandAlignment": "Not assessed in dummy mode",
             },
-            "visualQuality": {
+            "music": {
                 "score": 0.5,
-                "analysis": "Visual quality not assessed while dummy mode is enabled.",
-                "issues": [],
+                "analysis": "Music analysis not executed in dummy mode.",
+                "style": "Unknown",
+                "volume": "Unknown",
+                "brandAlignment": "Not assessed",
             },
-            "toneAccuracy": {
+            "soundEffects": {
                 "score": 0.5,
-                "analysis": "Tone evaluation not executed in dummy mode.",
-                "observations": [],
+                "analysis": "Sound effects not analyzed in dummy mode.",
+                "presence": "Unknown",
+                "quality": "Unknown",
             },
-            "violations": [],
-            "offBrandElements": [],
-            "overallImpression": (
-                "Dummy response – disable USE_DUMMY_OVERALL_CRITIC to trigger the real agent."
-            ),
-            "keyStrengths": ["Placeholder response only"],
-            "keyWeaknesses": ["Authentic critique not generated"],
-        }
-
-        return OverallCriticResult(
-            report=report,
-            prompt="DUMMY_MODE: Overall critic skipped",
-            warnings=[
-                "USE_DUMMY_OVERALL_CRITIC is enabled – no Gemini credits consumed."
+            "audioQuality": {
+                "score": 0.5,
+                "analysis": "Audio quality not assessed in dummy mode.",
+                "clarity": "Unknown",
+                "balance": "Unknown",
+            },
+            "overallAudioScore": 0.5,
+            "keyStrengths": ["Dummy result created to conserve Gemini credits."],
+            "keyWeaknesses": ["Authentic audio analysis not generated"],
+            "recommendations": [
+                "Disable USE_DUMMY_AUDIO_ANALYSIS to run the actual audio analysis agent.",
             ],
-            raw_text="Dummy overall critic output.",
+        }
+        
+        return AudioAnalysisResult(
+            report=report,
+            prompt="DUMMY_MODE: Audio analysis skipped",
+            warnings=[
+                "USE_DUMMY_AUDIO_ANALYSIS is enabled – no Gemini credits consumed."
+            ],
+            raw_text="Dummy audio analysis output.",
         )
-
+    
     stripped = _strip_data_uri_prefix(request.video_base64)
     decoded_bytes = _decode_base64(stripped)
-
+    
     with tempfile.NamedTemporaryFile(suffix=".mp4", delete=False) as temp_video_file:
         temp_video_file.write(decoded_bytes)
         temp_video_path = temp_video_file.name
-
+    
     client = get_genai_client()
-
+    
     try:
-        # Upload the video file
-        logger.info("Uploading video file to Google GenAI...")
+        # Upload the video file (Gemini can analyze audio from video)
+        logger.info("Uploading video file to Google GenAI for audio analysis...")
         uploaded_video = client.files.upload(file=temp_video_path)
         logger.info("Video uploaded, URI: %s", uploaded_video.uri if hasattr(uploaded_video, "uri") else "N/A")
         
-        # Wait for file to become ACTIVE
+        # Wait for file to be ready
         logger.info("Waiting for file to become ACTIVE...")
-        _wait_for_file_active(client, uploaded_video)
+        _wait_for_file_ready(client, uploaded_video)
         
-        # Now we can use the file
+        # Build prompt
         prompt = _build_prompt(request)
-        logger.info("Generating content with Gemini...")
-
+        
+        # Generate content with audio analysis
+        logger.info("Generating audio analysis with Gemini...")
         response = client.models.generate_content(
             model="gemini-2.0-flash-exp",
             contents=[
@@ -323,18 +304,23 @@ def run_overall_critic(request: OverallCriticRequest) -> OverallCriticResult:
                 }
             ],
         )
-
+        
         response_text = _extract_response_text(response)
-        parsed_payload, warnings = _parse_json_payload(response_text)
-
-        return OverallCriticResult(
-            report=parsed_payload,
+        parsed_json, warnings = _parse_json_payload(response_text)
+        
+        logger.info("Audio analysis completed successfully")
+        
+        return AudioAnalysisResult(
+            report=parsed_json,
             prompt=prompt,
             warnings=warnings,
             raw_text=response_text,
         )
+        
     finally:
+        # Clean up temp file
         try:
-            os.remove(temp_video_path)
-        except OSError:
-            logger.debug("Temporary video file %s already removed", temp_video_path)
+            os.unlink(temp_video_path)
+        except Exception as exc:
+            logger.warning("Failed to delete temp video file: %s", exc)
+

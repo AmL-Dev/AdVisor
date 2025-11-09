@@ -50,9 +50,13 @@ const STEP_LABELS: Record<string, string> = {
   "overall-critic": "Overall Critic Agent",
   "visual-style": "Visual Style Agent",
   "logo-detection": "Logo Detection Agent",
-  "frame-extraction": "Frame Extraction",
+  "frame-extraction": "Frame Extraction Agent",
+  "audio-analysis": "Audio Analysis Agent",
   "color-harmony": "Color Harmony Agent",
+  "safety-ethics": "Safety & Ethics Agent",
+  "message-clarity": "Message Clarity Agent",
   synthesizer: "Brand Synthesizer",
+  advisor: "Advisor Agent",
   input: "Input",
 };
 
@@ -229,8 +233,9 @@ export default function WorkflowGraph({
 
     const inputStep = steps.find((s) => s.id === "input");
     const synthesizerStep = steps.find((s) => s.id === "synthesizer");
+    const advisorStep = steps.find((s) => s.id === "advisor");
     const agentSteps = steps.filter(
-      (s) => s.id !== "input" && s.id !== "synthesizer",
+      (s) => s.id !== "input" && s.id !== "synthesizer" && s.id !== "advisor",
     );
 
     // Add input node
@@ -254,16 +259,22 @@ export default function WorkflowGraph({
 
     // Group steps by execution phase for better left-to-right layout
     const parallelSteps = agentSteps.filter(
-      (s) => ["overall-critic", "visual-style", "frame-extraction"].includes(s.id)
+      (s) => ["overall-critic", "visual-style", "frame-extraction", "audio-analysis", "safety-ethics", "message-clarity"].includes(s.id)
     );
     const sequentialSteps = agentSteps.filter(
       (s) => ["logo-detection", "color-harmony"].includes(s.id)
     );
 
     // Add parallel agent nodes (vertical stack at x=360)
+    let frameExtractionY = 160; // Default fallback
     parallelSteps.forEach((step, index) => {
       const x = 360;
       const y = 40 + index * 220;
+
+      // Track frame-extraction position for alignment
+      if (step.id === "frame-extraction") {
+        frameExtractionY = y;
+      }
 
       workflowNodes.push({
         id: step.id,
@@ -298,15 +309,19 @@ export default function WorkflowGraph({
                 ? "#3b82f6"
                 : "#9ca3af",
             strokeWidth: step.status === "running" ? 3 : 2,
+            strokeDasharray: step.status === "running" ? "5,5" : undefined,
           },
         });
       }
     });
 
-    // Add sequential agent nodes (logo-detection, color-harmony) after parallel steps
+    // Add sequential agent nodes (logo-detection, color-harmony) aligned with frame-extraction
     let sequentialX = 720;
-    sequentialSteps.forEach((step) => {
-      const y = 160; // Center vertically
+    sequentialSteps.forEach((step, index) => {
+      // Align logo-detection with frame-extraction, stack color-harmony below
+      const y = step.id === "logo-detection" 
+        ? frameExtractionY 
+        : frameExtractionY + 220; // Position color-harmony below logo-detection
       
       workflowNodes.push({
         id: step.id,
@@ -324,7 +339,7 @@ export default function WorkflowGraph({
         selected: selectedNodeId === step.id,
       });
 
-      // Connect from previous step
+      // Connect from previous step with improved routing
       let sourceId = "frame-extraction";
       if (step.id === "color-harmony") {
         sourceId = "logo-detection";
@@ -349,7 +364,17 @@ export default function WorkflowGraph({
                 : step.status === "running"
                 ? "#3b82f6"
                 : "#9ca3af",
-            strokeWidth: step.status === "running" ? 3 : 2,
+            strokeWidth: step.status === "running" ? 3 : 2.5,
+          },
+          markerEnd: {
+            type: "arrowclosed",
+            color: step.status === "success"
+              ? "#10b981"
+              : step.status === "failed"
+              ? "#ef4444"
+              : step.status === "running"
+              ? "#3b82f6"
+              : "#9ca3af",
           },
         });
       }
@@ -362,10 +387,17 @@ export default function WorkflowGraph({
       const synthesizerX = sequentialSteps.length > 0 
         ? sequentialX 
         : 1080; // Position after sequential steps or default
+      // Center synthesizer vertically between logo-detection and color-harmony if they exist
+      const synthesizerY = sequentialSteps.length >= 2 
+        ? frameExtractionY + 110 // Center between logo-detection and color-harmony
+        : sequentialSteps.length === 1 && sequentialSteps[0].id === "logo-detection"
+          ? frameExtractionY
+          : 160; // Default center
+      
       workflowNodes.push({
         id: synthesizerStep.id,
         type: "workflow",
-        position: { x: synthesizerX, y: 160 },
+        position: { x: synthesizerX, y: synthesizerY },
         data: {
           id: synthesizerStep.id,
           label: STEP_LABELS[synthesizerStep.id] || synthesizerStep.id,
@@ -378,19 +410,14 @@ export default function WorkflowGraph({
         selected: selectedNodeId === synthesizerStep.id,
       });
 
-      // Determine which step(s) should connect to synthesizer
-      // If color-harmony exists, only it connects to synthesizer
-      // Otherwise, if logo-detection exists, only it connects
-      // Otherwise, all parallel steps connect to synthesizer
-      const colorHarmonyStep = agentSteps.find((s) => s.id === "color-harmony");
-      const logoDetectionStep = agentSteps.find((s) => s.id === "logo-detection");
-      const sourcesForSynthesizer = colorHarmonyStep
-        ? [colorHarmonyStep]
-        : logoDetectionStep
-          ? [logoDetectionStep]
-          : agentSteps;
-
-      sourcesForSynthesizer.forEach((step) => {
+      // Connect brand alignment agents to the synthesizer
+      // This includes: overall-critic, visual-style, frame-extraction, 
+      // audio-analysis, logo-detection, and color-harmony
+      // (but NOT safety-ethics and message-clarity - they go to advisor)
+      const brandAlignmentAgents = agentSteps.filter(
+        (s) => !["safety-ethics", "message-clarity"].includes(s.id)
+      );
+      brandAlignmentAgents.forEach((step) => {
         workflowEdges.push({
           id: `${step.id}-${synthesizerStep.id}`,
           source: step.id,
@@ -406,9 +433,106 @@ export default function WorkflowGraph({
                 : synthesizerStep.status === "running"
                 ? "#3b82f6"
                 : "#9ca3af",
-            strokeWidth: synthesizerStep.status === "running" ? 3 : 2,
+            strokeWidth: synthesizerStep.status === "running" ? 3 : 2.5,
+            opacity: step.status === "success" ? 0.8 : 0.6,
+          },
+          markerEnd: {
+            type: "arrowclosed",
+            color: synthesizerStep.status === "success"
+              ? "#10b981"
+              : synthesizerStep.status === "failed"
+              ? "#ef4444"
+              : synthesizerStep.status === "running"
+              ? "#3b82f6"
+              : "#9ca3af",
           },
         });
+      });
+    }
+
+    // Add advisor node to the right (after synthesizer)
+    if (advisorStep) {
+      // Calculate advisor X position: after synthesizer
+      let advisorX = 1440; // Default
+      if (synthesizerStep) {
+        const synthesizerX = sequentialSteps.length > 0 
+          ? sequentialX 
+          : 1080;
+        advisorX = synthesizerX + 360;
+      }
+      
+      // Center advisor vertically (same as synthesizer)
+      const advisorY = synthesizerStep
+        ? (sequentialSteps.length >= 2 
+            ? frameExtractionY + 110
+            : sequentialSteps.length === 1 && sequentialSteps[0].id === "logo-detection"
+              ? frameExtractionY
+              : 160)
+        : 160;
+      
+      workflowNodes.push({
+        id: advisorStep.id,
+        type: "workflow",
+        position: { x: advisorX, y: advisorY },
+        data: {
+          id: advisorStep.id,
+          label: STEP_LABELS[advisorStep.id] || advisorStep.id,
+          status: advisorStep.status,
+          payload: advisorStep.payload,
+          output: advisorStep.output,
+          startedAt: advisorStep.startedAt,
+          endedAt: advisorStep.endedAt,
+        },
+        selected: selectedNodeId === advisorStep.id,
+      });
+
+      // Connect synthesizer, safety-ethics, and message-clarity to advisor
+      const advisorSources = [];
+      if (synthesizerStep) {
+        advisorSources.push(synthesizerStep.id);
+      }
+      const safetyEthicsStep = steps.find((s) => s.id === "safety-ethics");
+      const messageClarityStep = steps.find((s) => s.id === "message-clarity");
+      if (safetyEthicsStep) {
+        advisorSources.push("safety-ethics");
+      }
+      if (messageClarityStep) {
+        advisorSources.push("message-clarity");
+      }
+
+      advisorSources.forEach((sourceId) => {
+        const sourceNode = workflowNodes.find((n) => n.id === sourceId);
+        if (sourceNode) {
+          workflowEdges.push({
+            id: `${sourceId}-${advisorStep.id}`,
+            source: sourceId,
+            target: advisorStep.id,
+            animated: advisorStep.status === "running",
+            type: "smoothstep",
+            style: {
+              stroke:
+                advisorStep.status === "success"
+                  ? "#10b981"
+                  : advisorStep.status === "failed"
+                  ? "#ef4444"
+                  : advisorStep.status === "running"
+                  ? "#3b82f6"
+                  : "#9ca3af",
+              strokeWidth: advisorStep.status === "running" ? 3 : 2.5,
+              opacity: 0.8,
+            },
+            markerEnd: {
+              type: "arrowclosed",
+              color: advisorStep.status === "success"
+                ? "#10b981"
+                : advisorStep.status === "failed"
+                ? "#ef4444"
+                : advisorStep.status === "running"
+                ? "#3b82f6"
+                : "#9ca3af",
+            },
+          });
+        }
       });
     }
 

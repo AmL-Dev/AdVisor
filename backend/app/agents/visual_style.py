@@ -25,7 +25,7 @@ from ..services.gemini import get_genai_client
 logger = logging.getLogger(__name__)
 
 
-USE_DUMMY_VISUAL_STYLE = os.getenv("USE_DUMMY_VISUAL_STYLE", "true").lower() in {
+USE_DUMMY_VISUAL_STYLE = os.getenv("USE_DUMMY_VISUAL_STYLE", "false").lower() in {
     "1",
     "true",
     "yes",

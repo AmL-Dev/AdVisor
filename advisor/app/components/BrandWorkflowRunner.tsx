@@ -222,6 +222,16 @@ export default function BrandWorkflowRunner() {
         metadata: null,
       },
       {
+        id: "audio-analysis",
+        status: loading ? "running" : "pending",
+        startedAt: null,
+        endedAt: null,
+        payload: sharedPayload,
+        output: null,
+        warnings: [],
+        metadata: null,
+      },
+      {
         id: "logo-detection",
         status: "pending",
         startedAt: null,
@@ -419,7 +429,7 @@ export default function BrandWorkflowRunner() {
           };
         }
         // Update parallel steps to running
-        ["overall-critic", "visual-style", "frame-extraction"].forEach((id) => {
+        ["overall-critic", "visual-style", "frame-extraction", "audio-analysis"].forEach((id) => {
           const stepIndex = initialSteps.findIndex((s) => s.id === id);
           if (stepIndex >= 0) {
             initialSteps[stepIndex] = {
