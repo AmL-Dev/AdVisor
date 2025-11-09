@@ -17,8 +17,8 @@ interface FormData {
 interface PromptResponse {
   prompt: any;
   promptText: string;
-  status: string;
-  message: string;
+  status?: string;
+  message?: string;
 }
 
 export default function AdGenerator() {
@@ -92,11 +92,17 @@ export default function AdGenerator() {
         setGeneratedPrompt(data);
         setStep("prompt-review");
       } else {
-        // Directly generate video - prompt is in the response
-        if (data.prompt) {
-          await generateVideo(data.prompt);
+        if (data.video && data.prompt && data.promptText) {
+          setVideoUrl(data.video);
+          setGeneratedPrompt({
+            prompt: data.prompt,
+            promptText: data.promptText,
+            status: "generated",
+            message: data.message,
+          });
+          setStep("video");
         } else {
-          throw new Error("Failed to generate prompt");
+          throw new Error("Video generation response missing data");
         }
       }
     } catch (err) {
@@ -106,7 +112,12 @@ export default function AdGenerator() {
     }
   };
 
-  const generateVideo = async (prompt: any) => {
+  const generateVideo = async (prompt: any, promptText?: string) => {
+    if (!promptText) {
+      setError("Prompt text is required to generate the video.");
+      return;
+    }
+
     setLoading(true);
     setError("");
     setStep("generating");
@@ -124,6 +135,7 @@ export default function AdGenerator() {
           brandLogo: formData.brandLogo,
           productImage: formData.productImage,
           veo3Prompt: prompt,
+          promptText: promptText,
           aspectRatio: formData.aspectRatio,
         }),
       });
@@ -161,7 +173,7 @@ export default function AdGenerator() {
 
   const handleConfirmPrompt = async () => {
     if (generatedPrompt) {
-      await generateVideo(generatedPrompt.prompt);
+      await generateVideo(generatedPrompt.prompt, generatedPrompt.promptText);
     }
   };
 

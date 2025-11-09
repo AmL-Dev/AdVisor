@@ -11,6 +11,7 @@ from fastapi import APIRouter, HTTPException
 from ...agents.overall_critic import run_overall_critic
 from ...agents.synthesizer import run_synthesizer
 from ...agents.visual_style import run_visual_style
+from ...agents.frame_extractor import run_frame_extraction
 from ...schemas.critique import (
     AgentErrorResponse,
     OverallCriticRequest,
@@ -19,6 +20,16 @@ from ...schemas.critique import (
     SynthesizerResult,
     VisualStyleRequest,
     VisualStyleResult,
+    FrameExtractionRequest,
+    FrameExtractionResult,
+)
+from ...agents.video_prompt import run_video_prompt
+from ...agents.video_generator import run_video_generation
+from ...schemas.video import (
+    VideoPromptRequest,
+    VideoPromptResult,
+    VideoGenerationRequest,
+    VideoGenerationResult,
 )
 
 logger = logging.getLogger(__name__)
@@ -78,6 +89,77 @@ async def visual_style_endpoint(
         raise HTTPException(
             status_code=500,
             detail="Failed to execute visual style agent. Check backend logs.",
+        )
+
+
+@router.post(
+    "/frame-extraction",
+    response_model=FrameExtractionResult,
+    responses={400: {"model": AgentErrorResponse}},
+)
+async def frame_extraction_endpoint(
+    payload: FrameExtractionRequest,
+) -> FrameExtractionResult:
+    """
+    Extract frames from a video at a specified rate.
+    
+    This is a non-AI utility agent that extracts frames from the video
+    for downstream analysis by other agents (e.g., logo detection, color analysis).
+    """
+    
+    try:
+        return run_frame_extraction(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:  # noqa: BLE001
+        logger.exception("Unexpected error while running frame extraction agent")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to execute frame extraction agent. Check backend logs.",
+        )
+
+
+@router.post(
+    "/video-prompt",
+    response_model=VideoPromptResult,
+    responses={400: {"model": AgentErrorResponse}},
+)
+async def video_prompt_endpoint(payload: VideoPromptRequest) -> VideoPromptResult:
+    """Generate a Veo3 prompt using Gemini."""
+
+    try:
+        return run_video_prompt(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:  # noqa: BLE001
+        logger.exception("Unexpected error while running video prompt agent")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate video prompt. Check backend logs.",
+        )
+
+
+@router.post(
+    "/video-generation",
+    response_model=VideoGenerationResult,
+    responses={400: {"model": AgentErrorResponse}},
+)
+async def video_generation_endpoint(
+    payload: VideoGenerationRequest,
+) -> VideoGenerationResult:
+    """Generate a Veo3 video from prompt text and reference images."""
+
+    try:
+        return run_video_generation(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail=str(exc)) from exc
+    except Exception:  # noqa: BLE001
+        logger.exception("Unexpected error while running video generation agent")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to generate video. Check backend logs.",
         )
 
 

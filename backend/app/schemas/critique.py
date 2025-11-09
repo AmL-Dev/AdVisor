@@ -126,6 +126,55 @@ class SynthesizerResult(BaseModel):
     warnings: List[str] = Field(default_factory=list)
 
 
+class FrameExtractionRequest(BaseModel):
+    """
+    Request payload for frame extraction agent.
+    
+    Attributes:
+        video_base64: Base64-encoded video file
+        frames_per_second: Number of frames to extract per second (default: 2.0)
+    """
+    
+    video_base64: str = Field(..., alias="videoBase64")
+    frames_per_second: Optional[float] = Field(2.0, alias="framesPerSecond")
+    
+    class Config:
+        populate_by_name = True
+    
+    @validator("video_base64")
+    def validate_video(cls, value: str) -> str:
+        if not value:
+            raise ValueError("video_base64 must not be empty")
+        if len(value) < 100:
+            raise ValueError("video_base64 payload appears to be too small")
+        return value
+
+
+class ExtractedFrame(BaseModel):
+    """Single extracted frame from video."""
+    
+    frame_number: int = Field(..., alias="frameNumber")
+    timestamp: float
+    image_base64: str = Field(..., alias="imageBase64")
+    
+    class Config:
+        populate_by_name = True
+
+
+class FrameExtractionResult(BaseModel):
+    """Result of frame extraction."""
+    
+    frames: List[ExtractedFrame]
+    total_frames_extracted: int = Field(..., alias="totalFramesExtracted")
+    video_duration: float = Field(..., alias="videoDuration")
+    video_fps: float = Field(..., alias="videoFps")
+    extraction_rate: float = Field(..., alias="extractionRate")
+    warnings: List[str] = Field(default_factory=list)
+    
+    class Config:
+        populate_by_name = True
+
+
 class AgentErrorResponse(BaseModel):
     """Standardised error payload for agent endpoints."""
 
