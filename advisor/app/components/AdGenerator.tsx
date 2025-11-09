@@ -316,13 +316,19 @@ export default function AdGenerator() {
           </video>
         </div>
 
-        <div className="flex gap-4">
+        <div className="flex flex-col sm:flex-row gap-4">
           <a
             href={videoUrl}
             download="ad-clip.mp4"
             className="flex-1 px-6 py-3 rounded-lg bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 transition-colors font-medium text-center"
           >
             Download Video
+          </a>
+          <a
+            href={`/analyze?video=${encodeURIComponent(videoUrl)}&companyName=${encodeURIComponent(formData.companyName)}&productName=${encodeURIComponent(formData.productName)}&logo=${encodeURIComponent(formData.brandLogo)}&product=${encodeURIComponent(formData.productImage)}`}
+            className="flex-1 px-6 py-3 rounded-lg bg-blue-600 dark:bg-blue-500 text-white hover:bg-blue-700 dark:hover:bg-blue-600 transition-colors font-medium text-center"
+          >
+            Analyze Ad
           </a>
           <button
             onClick={handleReset}
