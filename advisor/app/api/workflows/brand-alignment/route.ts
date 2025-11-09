@@ -18,9 +18,13 @@ const workflowInputSchema = z.object({
 const stepOutputSchema = z.object({
   report: z.record(z.any()),
   prompt: z.string(),
-  model: z.string(),
   warnings: z.array(z.string()).default([]),
-  rawText: z.string().nullable().optional(),
+});
+
+const synthesizerInputSchema = z.object({
+  "overall-critic": stepOutputSchema,
+  "visual-style": stepOutputSchema,
+  brandContext: brandContextSchema,
 });
 
 const backendBaseUrl =
@@ -65,9 +69,94 @@ const overallCriticStep = createStep({
     return {
       report: payload.report ?? payload,
       prompt: payload.prompt ?? "",
-      model: payload.model ?? "gemini-2.0-flash-exp",
       warnings: payload.warnings ?? [],
-      rawText: payload.rawText ?? null,
+    };
+  },
+});
+
+const visualStyleStep = createStep({
+  id: "visual-style",
+  description: "Gemini visual style agent",
+  inputSchema: workflowInputSchema,
+  outputSchema: stepOutputSchema,
+  execute: async ({ inputData }) => {
+    const response = await fetch(`${backendBaseUrl}/agents/visual-style`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        videoBase64: inputData.videoBase64,
+        brandLogoBase64: inputData.brandLogoBase64,
+        productImageBase64: inputData.productImageBase64,
+        brandContext: inputData.brandContext,
+      }),
+    });
+
+    if (!response.ok) {
+      let message = "Failed to execute visual style agent";
+      try {
+        const errorPayload = await response.json();
+        message =
+          errorPayload?.detail ??
+          errorPayload?.error ??
+          response.statusText ??
+          message;
+      } catch (error) {
+        console.error("Failed to parse agent error payload", error);
+      }
+      throw new Error(message);
+    }
+
+    const payload = await response.json();
+
+    return {
+      report: payload.report ?? payload,
+      prompt: payload.prompt ?? "",
+      warnings: payload.warnings ?? [],
+    };
+  },
+});
+
+const synthesizerStep = createStep({
+  id: "synthesizer",
+  description: "Aggregates agent feedback into a unified critique",
+  inputSchema: synthesizerInputSchema,
+  outputSchema: stepOutputSchema,
+  execute: async ({ inputData }) => {
+    const response = await fetch(`${backendBaseUrl}/agents/synthesizer`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        overallReport: inputData["overall-critic"].report,
+        visualReport: inputData["visual-style"].report,
+        brandContext: inputData.brandContext,
+      }),
+    });
+
+    if (!response.ok) {
+      let message = "Failed to execute synthesizer agent";
+      try {
+        const errorPayload = await response.json();
+        message =
+          errorPayload?.detail ??
+          errorPayload?.error ??
+          response.statusText ??
+          message;
+      } catch (error) {
+        console.error("Failed to parse agent error payload", error);
+      }
+      throw new Error(message);
+    }
+
+    const payload = await response.json();
+
+    return {
+      report: payload.report ?? payload,
+      prompt: payload.prompt ?? "",
+      warnings: payload.warnings ?? [],
     };
   },
 });
@@ -78,7 +167,19 @@ const brandAlignmentWorkflow = createWorkflow({
   inputSchema: workflowInputSchema,
   outputSchema: stepOutputSchema,
 })
-  .then(overallCriticStep)
+  .parallel([overallCriticStep, visualStyleStep])
+  .map(async ({ getStepResult, getInitData }) => {
+    const overallCriticResult = await getStepResult("overall-critic");
+    const visualStyleResult = await getStepResult("visual-style");
+    const initialData = getInitData();
+
+    return {
+      "overall-critic": overallCriticResult,
+      "visual-style": visualStyleResult,
+      brandContext: initialData.brandContext,
+    };
+  })
+  .then(synthesizerStep)
   .commit();
 
 export async function POST(request: NextRequest) {
@@ -109,37 +210,62 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const steps = Object.entries(execution.steps).map(([id, step]) => {
-    const startedAt =
-      "startedAt" in step && typeof step.startedAt === "number"
-        ? new Date(step.startedAt).toISOString()
-        : null;
-    const endedAt =
-      "endedAt" in step && typeof step.endedAt === "number"
-        ? new Date(step.endedAt).toISOString()
-        : null;
+  // Add input step
+  const steps = [
+    {
+      id: "input",
+      status: "success" as const,
+      startedAt: new Date().toISOString(),
+      endedAt: new Date().toISOString(),
+      payload: validation.data,
+      output: null,
+      warnings: [],
+      metadata: null,
+    },
+    ...Object.entries(execution.steps)
+      .filter(([id]) => !id.startsWith("map"))
+      .map(([id, step]) => {
+      const startedAt =
+        "startedAt" in step && typeof step.startedAt === "number"
+          ? new Date(step.startedAt).toISOString()
+          : null;
+      const endedAt =
+        "endedAt" in step && typeof step.endedAt === "number"
+          ? new Date(step.endedAt).toISOString()
+          : null;
 
-    // Ensure payload is always an object, use inputData for first step if payload is missing
-    let payload = step.payload;
-    if (!payload && id === "overall-critic") {
-      // For the first step, use the workflow input data as payload
-      payload = validation.data;
-    }
+      // Ensure payload is always an object, use inputData if payload is missing
+      let payload = step.payload;
+      if (!payload && (id === "overall-critic" || id === "visual-style")) {
+        payload = validation.data;
+      }
+      if (
+        !payload &&
+        id === "synthesizer" &&
+        "overall-critic" in execution.steps &&
+        "visual-style" in execution.steps
+      ) {
+        payload = {
+          brandContext: validation.data.brandContext,
+          combinedFrom: ["overall-critic", "visual-style"],
+        };
+      }
 
-    return {
-      id,
-      status: step.status,
-      startedAt,
-      endedAt,
-      payload: payload || null,
-      output: "output" in step ? step.output : null,
-      warnings:
-        step.status === "success" && step.output?.warnings
-          ? step.output.warnings
-          : [],
-      metadata: step.metadata ?? null,
-    };
-  });
+      return {
+        id,
+        status: step.status,
+        startedAt,
+        endedAt,
+        payload: payload || null,
+        output: "output" in step ? step.output : null,
+        warnings:
+          step.status === "success" && step.output?.warnings
+            ? step.output.warnings
+            : [],
+        metadata: step.metadata ?? null,
+      };
+    }),
+  ];
 
   return NextResponse.json({
     status: execution.status,

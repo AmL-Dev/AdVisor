@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import type { ChangeEvent, FormEvent } from "react";
+import WorkflowGraph from "./WorkflowGraph";
 
 type BrandContext = {
   companyName: string;
@@ -48,6 +49,8 @@ type MediaDescriptor = {
 
 const STEP_LABELS: Record<string, string> = {
   "overall-critic": "Overall Critic Agent",
+  "visual-style": "Visual Style Agent",
+  synthesizer: "Brand Synthesizer",
 };
 
 async function fileToDataUrl(file: File): Promise<string> {
@@ -213,7 +216,11 @@ export default function BrandWorkflowRunner() {
 
       const data = (await response.json()) as WorkflowResponse;
       setWorkflowResult(data);
-      setExpandedStepId(data.steps[0]?.id ?? null);
+      const synthesizerStepId =
+        data.steps.find((step) => step.id === "synthesizer")?.id ??
+        data.steps[0]?.id ??
+        null;
+      setExpandedStepId(synthesizerStepId);
     } catch (submitError) {
       console.error(submitError);
       setError(
@@ -397,18 +404,332 @@ export default function BrandWorkflowRunner() {
         </form>
       </section>
 
-      {workflowResult && (
+      {(workflowResult || loading) && (
         <section className="space-y-6 rounded-3xl border border-zinc-200 bg-white p-6 shadow-lg dark:border-zinc-800 dark:bg-zinc-950 sm:p-8">
           <header className="space-y-1">
             <h3 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
               Workflow Execution
             </h3>
             <p className="text-sm text-zinc-600 dark:text-zinc-400">
-              Review each step&apos;s inputs and outputs. Click on a step to expand
-              its details and media previews.
+              Visual workflow graph showing agent execution. Click on nodes to view
+              detailed inputs and outputs. Use controls to zoom and pan.
             </p>
           </header>
 
+          {/* Workflow Graph View */}
+          <div className="w-full">
+            <WorkflowGraph
+              steps={
+                workflowResult?.steps || [
+                  {
+                    id: "input",
+                    status: "success",
+                    startedAt: new Date().toISOString(),
+                    endedAt: new Date().toISOString(),
+                    payload: {
+                      videoBase64,
+                      brandLogoBase64,
+                      productImageBase64,
+                      brandContext: {
+                        companyName,
+                        productName,
+                        briefPrompt: briefPrompt || undefined,
+                      },
+                    },
+                    output: null,
+                    warnings: [],
+                  },
+                  {
+                    id: "overall-critic",
+                    status: loading ? "running" : "pending",
+                    startedAt: null,
+                    endedAt: null,
+                    payload: {
+                      videoBase64,
+                      brandLogoBase64,
+                      productImageBase64,
+                      brandContext: {
+                        companyName,
+                        productName,
+                        briefPrompt: briefPrompt || undefined,
+                      },
+                    },
+                    output: null,
+                    warnings: [],
+                  },
+                  {
+                    id: "synthesizer",
+                    status: "pending",
+                    startedAt: null,
+                    endedAt: null,
+                    payload: {
+                      brandContext: {
+                        companyName,
+                        productName,
+                        briefPrompt: briefPrompt || undefined,
+                      },
+                      combinedFrom: ["overall-critic", "visual-style"],
+                    },
+                    output: null,
+                    warnings: [],
+                  },
+                ]
+              }
+              onNodeClick={(stepId) => {
+                // Allow clicking nodes even while loading to see current state
+                setExpandedStepId(stepId);
+              }}
+              selectedNodeId={expandedStepId}
+            />
+          </div>
+
+          {/* Detailed Step View (shown when node is clicked) */}
+          {expandedStepId && (workflowResult || loading) && (
+            <div className="mt-6 space-y-4">
+              {(() => {
+                // Find the step with the matching ID (use current steps or loading state)
+                const currentSteps = workflowResult?.steps || [
+                  {
+                    id: "input",
+                    status: "success",
+                    startedAt: new Date().toISOString(),
+                    endedAt: new Date().toISOString(),
+                    payload: {
+                      videoBase64,
+                      brandLogoBase64,
+                      productImageBase64,
+                      brandContext: {
+                        companyName,
+                        productName,
+                        briefPrompt: briefPrompt || undefined,
+                      },
+                    },
+                    output: null,
+                    warnings: [],
+                  },
+                  {
+                    id: "overall-critic",
+                    status: loading ? "running" : "pending",
+                    startedAt: null,
+                    endedAt: null,
+                    payload: {
+                      videoBase64,
+                      brandLogoBase64,
+                      productImageBase64,
+                      brandContext: {
+                        companyName,
+                        productName,
+                        briefPrompt: briefPrompt || undefined,
+                      },
+                    },
+                    output: null,
+                    warnings: [],
+                  },
+                  {
+                    id: "visual-style",
+                    status: loading ? "running" : "pending",
+                    startedAt: null,
+                    endedAt: null,
+                    payload: {
+                      videoBase64,
+                      brandLogoBase64,
+                      productImageBase64,
+                      brandContext: {
+                        companyName,
+                        productName,
+                        briefPrompt: briefPrompt || undefined,
+                      },
+                    },
+                    output: null,
+                    warnings: [],
+                  },
+                  {
+                    id: "synthesizer",
+                    status: "pending",
+                    startedAt: null,
+                    endedAt: null,
+                    payload: {
+                      brandContext: {
+                        companyName,
+                        productName,
+                        briefPrompt: briefPrompt || undefined,
+                      },
+                      combinedFrom: ["overall-critic", "visual-style"],
+                    },
+                    output: null,
+                    warnings: [],
+                  },
+                  {
+                    id: "visual-style",
+                    status: loading ? "running" : "pending",
+                    startedAt: null,
+                    endedAt: null,
+                    payload: {
+                      videoBase64,
+                      brandLogoBase64,
+                      productImageBase64,
+                      brandContext: {
+                        companyName,
+                        productName,
+                        briefPrompt: briefPrompt || undefined,
+                      },
+                    },
+                    output: null,
+                    warnings: [],
+                  },
+                ];
+                
+                const step = currentSteps.find((s) => s.id === expandedStepId);
+                if (!step) return null;
+                
+                const payload = step.payload || {};
+                const media: MediaDescriptor[] = [
+                  {
+                    type: "video",
+                    data: payload.videoBase64,
+                    label: "Input Video",
+                  },
+                  {
+                    type: "image",
+                    data: payload.brandLogoBase64,
+                    label: "Brand Logo",
+                  },
+                  {
+                    type: "image",
+                    data: payload.productImageBase64,
+                    label: "Product Image",
+                  },
+                ];
+
+                return (
+                  <div
+                    key={step.id}
+                    className="overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-50/60 shadow-sm dark:border-zinc-800 dark:bg-zinc-900/50"
+                  >
+                      <div className="space-y-6 border-t border-zinc-200 bg-white px-4 py-5 dark:border-zinc-800 dark:bg-zinc-950 sm:px-6">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <h4 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50">
+                              {STEP_LABELS[step.id] ?? step.id} - Details
+                            </h4>
+                            {step.status === "running" && (
+                              <p className="text-sm text-blue-600 dark:text-blue-400 mt-1 flex items-center gap-2">
+                                <span className="animate-spin">⟳</span> Currently running...
+                              </p>
+                            )}
+                            {step.status === "pending" && (
+                              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                                Waiting to start...
+                              </p>
+                            )}
+                          </div>
+                          <button
+                            onClick={() => setExpandedStepId(null)}
+                            className="text-sm text-zinc-500 hover:text-zinc-700 dark:text-zinc-400 dark:hover:text-zinc-200"
+                          >
+                            Close
+                          </button>
+                        </div>
+
+                        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+                          <div className="space-y-4">
+                            <h5 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+                              Inputs
+                            </h5>
+                            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                              {media.map((descriptor) => (
+                                <div key={descriptor.label}>
+                                  {renderMediaPreview(descriptor)}
+                                </div>
+                              ))}
+                            </div>
+                            {payload.brandContext && (
+                              <div className="rounded-xl border border-zinc-200 bg-zinc-50/70 p-4 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-200">
+                                <p className="font-medium text-zinc-800 dark:text-zinc-100">
+                                  Brand Context
+                                </p>
+                                <ul className="mt-2 space-y-1">
+                                  <li>
+                                    <strong>Company:</strong>{" "}
+                                    {payload.brandContext.companyName}
+                                  </li>
+                                  <li>
+                                    <strong>Product:</strong>{" "}
+                                    {payload.brandContext.productName}
+                                  </li>
+                                  {payload.brandContext.briefPrompt && (
+                                    <li>
+                                      <strong>Brief:</strong>{" "}
+                                      {payload.brandContext.briefPrompt}
+                                    </li>
+                                  )}
+                                </ul>
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="space-y-4">
+                            <h5 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+                              Output
+                            </h5>
+                            <div className="rounded-xl border border-zinc-200 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-900/70">
+                              {step.output ? (
+                                <div className="space-y-3 text-sm text-zinc-700 dark:text-zinc-200">
+                                  {step.output.warnings?.length > 0 && (
+                                    <div>
+                                      <p className="font-medium text-zinc-800 dark:text-zinc-100">
+                                        Warnings
+                                      </p>
+                                      <ul className="mt-1 list-disc space-y-1 pl-4">
+                                        {step.output.warnings.map((warning, index) => (
+                                          <li key={index}>{warning}</li>
+                                        ))}
+                                      </ul>
+                                    </div>
+                                  )}
+                                  {step.output.report && (
+                                    <div>
+                                      <p className="font-medium text-zinc-800 dark:text-zinc-100 mb-2">
+                                        Report
+                                      </p>
+                                      <pre className="max-h-96 overflow-auto rounded bg-zinc-100 p-3 text-xs dark:bg-zinc-800">
+                                        {JSON.stringify(step.output.report, null, 2)}
+                                      </pre>
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                                  No output available
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  );
+              })()}
+            </div>
+          )}
+
+          {/* Overall Result Summary */}
+          {workflowResult && !expandedStepId && (
+            <div className="mt-6 rounded-2xl border border-zinc-200 bg-zinc-50/80 p-5 dark:border-zinc-800 dark:bg-zinc-900/70">
+              <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100 mb-3">
+                Overall Result
+              </h4>
+              <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-lg bg-zinc-900/90 p-3 text-xs text-zinc-50">
+                {JSON.stringify(workflowResult.result.report, null, 2)}
+              </pre>
+            </div>
+          )}
+        </section>
+      )}
+
+      {/* Legacy List View (hidden, kept for reference) */}
+      {false && workflowResult && (
+        <section className="space-y-6 rounded-3xl border border-zinc-200 bg-white p-6 shadow-lg dark:border-zinc-800 dark:bg-zinc-950 sm:p-8">
           <div className="space-y-4">
             {workflowResult.steps.map((step) => {
               const isExpanded = expandedStepId === step.id;
