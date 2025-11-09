@@ -25,6 +25,14 @@ from ..services.gemini import get_genai_client
 logger = logging.getLogger(__name__)
 
 
+USE_DUMMY_VISUAL_STYLE = os.getenv("USE_DUMMY_VISUAL_STYLE", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+
 DATA_URI_PATTERN = re.compile(r"^data:.+;base64,")
 
 
@@ -175,6 +183,39 @@ def _build_prompt(request: VisualStyleRequest) -> str:
 
 def run_visual_style(request: VisualStyleRequest) -> VisualStyleResult:
     """Execute the visual style agent and return a structured result."""
+
+    if USE_DUMMY_VISUAL_STYLE:
+        brand = request.brand_context
+        brand_description = f"{brand.company_name}'s {brand.product_name}".strip()
+
+        report = {
+            "overallScore": 0.5,
+            "scores": {
+                "visualStyleConsistency": 0.5,
+                "aestheticQuality": 0.5,
+                "brandVisualAlignment": 0.5,
+                "colorPaletteHarmony": 0.5,
+                "typographyTreatment": 0.5,
+                "visualHierarchy": 0.5,
+                "productionQuality": 0.5,
+            },
+            "strengths": ["Dummy result created to conserve Gemini credits."],
+            "weaknesses": ["Authentic visual review not performed."],
+            "recommendations": [
+                "Disable USE_DUMMY_VISUAL_STYLE to run the actual visual analysis."
+            ],
+            "styleNotes": (
+                f"No real analysis executed for {brand_description} while dummy mode is enabled."
+            ),
+        }
+
+        return VisualStyleResult(
+            report=report,
+            prompt="DUMMY_MODE: Visual style agent skipped",
+            warnings=[
+                "USE_DUMMY_VISUAL_STYLE is enabled – Gemini visual analysis bypassed."
+            ],
+        )
 
     # Decode video
     stripped = _strip_data_uri_prefix(request.video_base64)

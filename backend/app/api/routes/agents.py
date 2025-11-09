@@ -12,8 +12,11 @@ from ...agents.overall_critic import run_overall_critic
 from ...agents.synthesizer import run_synthesizer
 from ...agents.visual_style import run_visual_style
 from ...agents.frame_extractor import run_frame_extraction
+from ...agents.logo_detector import run_logo_detection
+from ...agents.color_harmony import run_color_harmony
 from ...schemas.critique import (
     AgentErrorResponse,
+    FrameExtractionResult,
     OverallCriticRequest,
     OverallCriticResult,
     SynthesizerRequest,
@@ -21,7 +24,10 @@ from ...schemas.critique import (
     VisualStyleRequest,
     VisualStyleResult,
     FrameExtractionRequest,
-    FrameExtractionResult,
+    LogoDetectionRequest,
+    LogoDetectionResult,
+    ColorHarmonyRequest,
+    ColorHarmonyResult,
 )
 from ...agents.video_prompt import run_video_prompt
 from ...agents.video_generator import run_video_generation
@@ -120,6 +126,30 @@ async def frame_extraction_endpoint(
 
 
 @router.post(
+    "/logo-detection",
+    response_model=LogoDetectionResult,
+    responses={400: {"model": AgentErrorResponse}},
+)
+async def logo_detection_endpoint(
+    payload: LogoDetectionRequest,
+) -> LogoDetectionResult:
+    """
+    Detect and extract brand logos from the provided frames.
+    """
+
+    try:
+        return run_logo_detection(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:  # noqa: BLE001
+        logger.exception("Unexpected error while running logo detection agent")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to execute logo detection agent. Check backend logs.",
+        )
+
+
+@router.post(
     "/video-prompt",
     response_model=VideoPromptResult,
     responses={400: {"model": AgentErrorResponse}},
@@ -160,6 +190,33 @@ async def video_generation_endpoint(
         raise HTTPException(
             status_code=500,
             detail="Failed to generate video. Check backend logs.",
+        )
+
+
+@router.post(
+    "/color-harmony",
+    response_model=ColorHarmonyResult,
+    responses={400: {"model": AgentErrorResponse}},
+)
+async def color_harmony_endpoint(
+    payload: ColorHarmonyRequest,
+) -> ColorHarmonyResult:
+    """
+    Execute the color harmony agent.
+
+    Analyzes color palettes from detected logos and video frames, comparing them
+    against official brand assets to assess color alignment and harmony.
+    """
+
+    try:
+        return run_color_harmony(payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception:  # noqa: BLE001
+        logger.exception("Unexpected error while running color harmony agent")
+        raise HTTPException(
+            status_code=500,
+            detail="Failed to execute color harmony agent. Check backend logs.",
         )
 
 

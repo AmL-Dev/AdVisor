@@ -49,6 +49,9 @@ type WorkflowGraphProps = {
 const STEP_LABELS: Record<string, string> = {
   "overall-critic": "Overall Critic Agent",
   "visual-style": "Visual Style Agent",
+  "logo-detection": "Logo Detection Agent",
+  "frame-extraction": "Frame Extraction",
+  "color-harmony": "Color Harmony Agent",
   synthesizer: "Brand Synthesizer",
   input: "Input",
 };
@@ -249,8 +252,16 @@ export default function WorkflowGraph({
       });
     }
 
-    // Add agent nodes (vertical stack)
-    agentSteps.forEach((step, index) => {
+    // Group steps by execution phase for better left-to-right layout
+    const parallelSteps = agentSteps.filter(
+      (s) => ["overall-critic", "visual-style", "frame-extraction"].includes(s.id)
+    );
+    const sequentialSteps = agentSteps.filter(
+      (s) => ["logo-detection", "color-harmony"].includes(s.id)
+    );
+
+    // Add parallel agent nodes (vertical stack at x=360)
+    parallelSteps.forEach((step, index) => {
       const x = 360;
       const y = 40 + index * 220;
 
@@ -292,12 +303,69 @@ export default function WorkflowGraph({
       }
     });
 
-    // Add synthesizer node to the right
+    // Add sequential agent nodes (logo-detection, color-harmony) after parallel steps
+    let sequentialX = 720;
+    sequentialSteps.forEach((step) => {
+      const y = 160; // Center vertically
+      
+      workflowNodes.push({
+        id: step.id,
+        type: "workflow",
+        position: { x: sequentialX, y },
+        data: {
+          id: step.id,
+          label: STEP_LABELS[step.id] || step.id,
+          status: step.status,
+          payload: step.payload,
+          output: step.output,
+          startedAt: step.startedAt,
+          endedAt: step.endedAt,
+        },
+        selected: selectedNodeId === step.id,
+      });
+
+      // Connect from previous step
+      let sourceId = "frame-extraction";
+      if (step.id === "color-harmony") {
+        sourceId = "logo-detection";
+      } else if (step.id === "logo-detection") {
+        sourceId = "frame-extraction";
+      }
+
+      const sourceStep = workflowNodes.find((n) => n.id === sourceId);
+      if (sourceStep) {
+        workflowEdges.push({
+          id: `${sourceId}-${step.id}`,
+          source: sourceId,
+          target: step.id,
+          animated: step.status === "running",
+          type: "smoothstep",
+          style: {
+            stroke:
+              step.status === "success"
+                ? "#10b981"
+                : step.status === "failed"
+                ? "#ef4444"
+                : step.status === "running"
+                ? "#3b82f6"
+                : "#9ca3af",
+            strokeWidth: step.status === "running" ? 3 : 2,
+          },
+        });
+      }
+
+      sequentialX += 360; // Move right for next sequential step
+    });
+
+    // Add synthesizer node to the right (after all sequential steps)
     if (synthesizerStep) {
+      const synthesizerX = sequentialSteps.length > 0 
+        ? sequentialX 
+        : 1080; // Position after sequential steps or default
       workflowNodes.push({
         id: synthesizerStep.id,
         type: "workflow",
-        position: { x: 760, y: 160 },
+        position: { x: synthesizerX, y: 160 },
         data: {
           id: synthesizerStep.id,
           label: STEP_LABELS[synthesizerStep.id] || synthesizerStep.id,
@@ -310,7 +378,19 @@ export default function WorkflowGraph({
         selected: selectedNodeId === synthesizerStep.id,
       });
 
-      agentSteps.forEach((step) => {
+      // Determine which step(s) should connect to synthesizer
+      // If color-harmony exists, only it connects to synthesizer
+      // Otherwise, if logo-detection exists, only it connects
+      // Otherwise, all parallel steps connect to synthesizer
+      const colorHarmonyStep = agentSteps.find((s) => s.id === "color-harmony");
+      const logoDetectionStep = agentSteps.find((s) => s.id === "logo-detection");
+      const sourcesForSynthesizer = colorHarmonyStep
+        ? [colorHarmonyStep]
+        : logoDetectionStep
+          ? [logoDetectionStep]
+          : agentSteps;
+
+      sourcesForSynthesizer.forEach((step) => {
         workflowEdges.push({
           id: `${step.id}-${synthesizerStep.id}`,
           source: step.id,

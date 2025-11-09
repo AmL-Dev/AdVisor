@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, validator, ValidationInfo
 
 
 class BrandContext(BaseModel):
@@ -77,7 +77,7 @@ class VisualStyleRequest(BaseModel):
 
     video_base64: str = Field(..., alias="videoBase64")
     brand_logo_base64: str = Field(..., alias="brandLogoBase64")
-    product_image_base64: str = Field(..., alias="productImageBase64")
+    product_image_base64: Optional[str] = Field(None, alias="productImageBase64")
     brand_context: BrandContext = Field(..., alias="brandContext")
 
     class Config:
@@ -169,6 +169,128 @@ class FrameExtractionResult(BaseModel):
     video_duration: float = Field(..., alias="videoDuration")
     video_fps: float = Field(..., alias="videoFps")
     extraction_rate: float = Field(..., alias="extractionRate")
+    warnings: List[str] = Field(default_factory=list)
+    
+    class Config:
+        populate_by_name = True
+
+
+class LogoBoundingBox(BaseModel):
+    """Normalized bounding box for a detected logo."""
+
+    x: float
+    y: float
+    width: float
+    height: float
+
+    @field_validator("x", "y", "width", "height")
+    @classmethod
+    def validate_bounds(cls, value: float, info: ValidationInfo) -> float:
+        if value < 0 or value > 1:
+            raise ValueError(f"{info.field_name} must be between 0 and 1")
+        return value
+
+
+class DetectedLogo(BaseModel):
+    """Represents a detected logo instance."""
+
+    frame_number: int = Field(..., alias="frameNumber")
+    timestamp: float
+    method: str
+    confidence: float
+    bounding_box: Optional[LogoBoundingBox] = Field(None, alias="boundingBox")
+    crop_image_base64: Optional[str] = Field(None, alias="cropImageBase64")
+    notes: Optional[str] = None
+
+    class Config:
+        populate_by_name = True
+
+
+class LogoDetectionRequest(BaseModel):
+    """
+    Request payload for the logo detection agent.
+
+    Attributes:
+        frames: Extracted frames from the video (output of frame_extraction).
+        brand_logo_base64: Reference brand logo image (base64).
+        brand_context: Brand metadata for logging/prompts.
+    """
+
+    frames: List[ExtractedFrame]
+    brand_logo_base64: str = Field(..., alias="brandLogoBase64")
+    brand_context: BrandContext = Field(..., alias="brandContext")
+    prefer_clip: bool = Field(True, alias="preferClip")
+    use_gemini_fallback: bool = Field(True, alias="useGeminiFallback")
+
+    class Config:
+        populate_by_name = True
+
+    @validator("brand_logo_base64")
+    def validate_logo(cls, value: str) -> str:
+        if not value:
+            raise ValueError("brand_logo_base64 must not be empty")
+        if len(value) < 100:
+            raise ValueError("brand_logo_base64 payload appears to be too small")
+        return value
+
+
+class LogoDetectionResult(BaseModel):
+    """Result payload for detected logos."""
+
+    logo_found: bool = Field(..., alias="logoFound")
+    detections: List[DetectedLogo] = Field(default_factory=list)
+    primary_detection: Optional[DetectedLogo] = Field(None, alias="primaryDetection")
+    method_used: Optional[str] = Field(None, alias="methodUsed")
+    warnings: List[str] = Field(default_factory=list)
+    notes: Optional[str] = None
+
+    class Config:
+        populate_by_name = True
+
+
+class ColorPalette(BaseModel):
+    """Extracted color palette from an image."""
+    
+    dominant_colors: List[str] = Field(..., alias="dominantColors")  # HEX codes
+    secondary_colors: List[str] = Field(default_factory=list, alias="secondaryColors")
+    color_count: int = Field(..., alias="colorCount")
+    
+    class Config:
+        populate_by_name = True
+
+
+class ColorHarmonyRequest(BaseModel):
+    """
+    Request payload for the color harmony agent.
+    
+    Attributes:
+        frames: Extracted frames from the video
+        logo_detections: Detected logos (if any)
+        brand_logo_base64: Reference brand logo for color comparison
+        product_image_base64: Optional product image for color reference
+        brand_context: Brand metadata
+    """
+    
+    frames: List[ExtractedFrame]
+    logo_detections: List[DetectedLogo] = Field(default_factory=list, alias="logoDetections")
+    brand_logo_base64: str = Field(..., alias="brandLogoBase64")
+    product_image_base64: Optional[str] = Field(None, alias="productImageBase64")
+    brand_context: BrandContext = Field(..., alias="brandContext")
+    
+    class Config:
+        populate_by_name = True
+
+
+class ColorHarmonyResult(BaseModel):
+    """Result of color harmony analysis."""
+    
+    overall_score: float = Field(..., alias="overallScore")  # 0-1
+    logo_colors: Optional[ColorPalette] = Field(None, alias="logoColors")
+    frame_colors: ColorPalette = Field(..., alias="frameColors")
+    brand_logo_colors: ColorPalette = Field(..., alias="brandLogoColors")
+    color_alignment_score: float = Field(..., alias="colorAlignmentScore")  # 0-1
+    analysis: str
+    recommendations: List[str] = Field(default_factory=list)
     warnings: List[str] = Field(default_factory=list)
     
     class Config:

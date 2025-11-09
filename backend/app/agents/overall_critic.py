@@ -24,6 +24,14 @@ from ..services.gemini import get_genai_client
 logger = logging.getLogger(__name__)
 
 
+USE_DUMMY_OVERALL_CRITIC = os.getenv("USE_DUMMY_OVERALL_CRITIC", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
+
+
 DATA_URI_PATTERN = re.compile(r"^data:.+;base64,")
 
 
@@ -234,6 +242,46 @@ def _wait_for_file_active(client, file_obj, max_wait_seconds: int = 120) -> None
 
 def run_overall_critic(request: OverallCriticRequest) -> OverallCriticResult:
     """Execute the overall critic agent and return a structured result."""
+
+    if USE_DUMMY_OVERALL_CRITIC:
+        brand = request.brand_context
+        brand_description = f"{brand.company_name}'s {brand.product_name}".strip()
+
+        report = {
+            "brandAlignment": {
+                "score": 0.5,
+                "analysis": f"Placeholder evaluation generated for {brand_description}.",
+                "observations": [
+                    "Dummy mode active – real Gemini analysis skipped to save credits.",
+                ],
+            },
+            "visualQuality": {
+                "score": 0.5,
+                "analysis": "Visual quality not assessed while dummy mode is enabled.",
+                "issues": [],
+            },
+            "toneAccuracy": {
+                "score": 0.5,
+                "analysis": "Tone evaluation not executed in dummy mode.",
+                "observations": [],
+            },
+            "violations": [],
+            "offBrandElements": [],
+            "overallImpression": (
+                "Dummy response – disable USE_DUMMY_OVERALL_CRITIC to trigger the real agent."
+            ),
+            "keyStrengths": ["Placeholder response only"],
+            "keyWeaknesses": ["Authentic critique not generated"],
+        }
+
+        return OverallCriticResult(
+            report=report,
+            prompt="DUMMY_MODE: Overall critic skipped",
+            warnings=[
+                "USE_DUMMY_OVERALL_CRITIC is enabled – no Gemini credits consumed."
+            ],
+            raw_text="Dummy overall critic output.",
+        )
 
     stripped = _strip_data_uri_prefix(request.video_base64)
     decoded_bytes = _decode_base64(stripped)

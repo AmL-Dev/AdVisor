@@ -11,13 +11,91 @@ type BrandContext = {
   briefPrompt?: string;
 };
 
-type StepOutput = {
+type ReportStepOutput = {
   report: Record<string, unknown>;
   prompt: string;
-  model: string;
+  model?: string;
   warnings: string[];
   rawText?: string | null;
 };
+
+type FrameExtractionStepOutput = {
+  frames: {
+    frame_number: number;
+    timestamp: number;
+    image_base64: string;
+  }[];
+  total_frames_extracted: number;
+  video_duration: number;
+  video_fps: number;
+  extraction_rate: number;
+  warnings: string[];
+};
+
+type LogoDetectionBoundingBox = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
+type LogoDetectionDetection = {
+  frame_number: number;
+  timestamp: number;
+  method: string;
+  confidence: number;
+  bounding_box: LogoDetectionBoundingBox | null;
+  crop_image_base64: string | null;
+  notes?: string | null;
+};
+
+type LogoDetectionStepOutput = {
+  logo_found: boolean;
+  detections: LogoDetectionDetection[];
+  primary_detection: LogoDetectionDetection | null;
+  method_used: string | null;
+  warnings: string[];
+  notes?: string | null;
+};
+
+type ColorPaletteOutput = {
+  dominant_colors: string[];
+  secondary_colors: string[];
+  color_count: number;
+};
+
+type ColorHarmonyStepOutput = {
+  overall_score: number;
+  logo_colors: ColorPaletteOutput | null;
+  frame_colors: ColorPaletteOutput;
+  brand_logo_colors: ColorPaletteOutput;
+  color_alignment_score: number;
+  analysis: string;
+  recommendations: string[];
+  warnings: string[];
+};
+
+type StepOutput =
+  | ReportStepOutput
+  | FrameExtractionStepOutput
+  | LogoDetectionStepOutput
+  | ColorHarmonyStepOutput;
+
+function isReportOutput(output: StepOutput): output is ReportStepOutput {
+  return "report" in output;
+}
+
+function isFrameExtractionOutput(output: StepOutput): output is FrameExtractionStepOutput {
+  return "frames" in output;
+}
+
+function isLogoDetectionOutput(output: StepOutput): output is LogoDetectionStepOutput {
+  return "logo_found" in output;
+}
+
+function isColorHarmonyOutput(output: StepOutput): output is ColorHarmonyStepOutput {
+  return "color_alignment_score" in output;
+}
 
 type WorkflowStep = {
   id: string;
@@ -37,7 +115,7 @@ type WorkflowStep = {
 
 type WorkflowResponse = {
   status: string;
-  result: StepOutput;
+  result: ReportStepOutput;
   steps: WorkflowStep[];
 };
 
@@ -50,6 +128,9 @@ type MediaDescriptor = {
 const STEP_LABELS: Record<string, string> = {
   "overall-critic": "Overall Critic Agent",
   "visual-style": "Visual Style Agent",
+  "frame-extraction": "Frame Extraction",
+  "logo-detection": "Logo Detection Agent",
+  "color-harmony": "Color Harmony Agent",
   synthesizer: "Brand Synthesizer",
 };
 
@@ -82,6 +163,105 @@ export default function BrandWorkflowRunner() {
   const [expandedMedia, setExpandedMedia] = useState<MediaDescriptor | null>(
     null,
   );
+
+  const createPlaceholderSteps = (): WorkflowStep[] => {
+    const brandContextPayload: BrandContext = {
+      companyName,
+      productName,
+      briefPrompt: briefPrompt || undefined,
+    };
+
+    const sharedPayload = {
+      videoBase64,
+      brandLogoBase64,
+      ...(productImageBase64 && { productImageBase64 }),
+      brandContext: brandContextPayload,
+    };
+
+    const nowIso = new Date().toISOString();
+
+    return [
+      {
+        id: "input",
+        status: "success",
+        startedAt: nowIso,
+        endedAt: nowIso,
+        payload: sharedPayload,
+        output: null,
+        warnings: [],
+        metadata: null,
+      },
+      {
+        id: "overall-critic",
+        status: loading ? "running" : "pending",
+        startedAt: null,
+        endedAt: null,
+        payload: sharedPayload,
+        output: null,
+        warnings: [],
+        metadata: null,
+      },
+      {
+        id: "visual-style",
+        status: loading ? "running" : "pending",
+        startedAt: null,
+        endedAt: null,
+        payload: sharedPayload,
+        output: null,
+        warnings: [],
+        metadata: null,
+      },
+      {
+        id: "frame-extraction",
+        status: loading ? "running" : "pending",
+        startedAt: null,
+        endedAt: null,
+        payload: sharedPayload,
+        output: null,
+        warnings: [],
+        metadata: null,
+      },
+      {
+        id: "logo-detection",
+        status: "pending",
+        startedAt: null,
+        endedAt: null,
+        payload: {
+          brandLogoBase64,
+          brandContext: brandContextPayload,
+        },
+        output: null,
+        warnings: [],
+        metadata: null,
+      },
+      {
+        id: "color-harmony",
+        status: "pending",
+        startedAt: null,
+        endedAt: null,
+        payload: {
+          brandLogoBase64,
+          brandContext: brandContextPayload,
+        },
+        output: null,
+        warnings: [],
+        metadata: null,
+      },
+      {
+        id: "synthesizer",
+        status: "pending",
+        startedAt: null,
+        endedAt: null,
+        payload: {
+          brandContext: brandContextPayload,
+          combinedFrom: ["overall-critic", "visual-style", "logo-detection"],
+        },
+        output: null,
+        warnings: [],
+        metadata: null,
+      },
+    ];
+  };
 
   // Load data from URL parameters if present (e.g., when coming from ad generator)
   useEffect(() => {
@@ -116,10 +296,9 @@ export default function BrandWorkflowRunner() {
       companyName.trim().length > 0 &&
       productName.trim().length > 0 &&
       videoBase64 &&
-      brandLogoBase64 &&
-      productImageBase64
+      brandLogoBase64
     );
-  }, [companyName, productName, videoBase64, brandLogoBase64, productImageBase64]);
+  }, [companyName, productName, videoBase64, brandLogoBase64]);
 
   const handleFileUpload =
     (type: "video" | "brandLogo" | "productImage") =>
@@ -187,6 +366,7 @@ export default function BrandWorkflowRunner() {
     setWorkflowResult(null);
 
     try {
+      // Use streaming to get intermediate updates
       const response = await fetch("/api/workflows/brand-alignment", {
         method: "POST",
         headers: {
@@ -195,12 +375,13 @@ export default function BrandWorkflowRunner() {
         body: JSON.stringify({
           videoBase64,
           brandLogoBase64,
-          productImageBase64,
+          ...(productImageBase64 && { productImageBase64 }),
           brandContext: {
             companyName,
             productName,
             briefPrompt: briefPrompt || undefined,
           },
+          stream: true, // Enable streaming
         }),
       });
 
@@ -214,13 +395,109 @@ export default function BrandWorkflowRunner() {
         throw new Error(message);
       }
 
-      const data = (await response.json()) as WorkflowResponse;
-      setWorkflowResult(data);
-      const synthesizerStepId =
-        data.steps.find((step) => step.id === "synthesizer")?.id ??
-        data.steps[0]?.id ??
-        null;
-      setExpandedStepId(synthesizerStepId);
+      // Check if response is streaming (SSE)
+      const contentType = response.headers.get("content-type");
+      if (contentType?.includes("text/event-stream")) {
+        // Handle streaming response
+        const reader = response.body?.getReader();
+        const decoder = new TextDecoder();
+        
+        if (!reader) {
+          throw new Error("Streaming response body is not available");
+        }
+
+        // Initialize with all steps (using placeholder steps to show full workflow)
+        const initialSteps = createPlaceholderSteps();
+        // Update input step to success
+        const inputStepIndex = initialSteps.findIndex((s) => s.id === "input");
+        if (inputStepIndex >= 0) {
+          initialSteps[inputStepIndex] = {
+            ...initialSteps[inputStepIndex],
+            status: "success",
+            startedAt: new Date().toISOString(),
+            endedAt: new Date().toISOString(),
+          };
+        }
+        // Update parallel steps to running
+        ["overall-critic", "visual-style", "frame-extraction"].forEach((id) => {
+          const stepIndex = initialSteps.findIndex((s) => s.id === id);
+          if (stepIndex >= 0) {
+            initialSteps[stepIndex] = {
+              ...initialSteps[stepIndex],
+              status: "running",
+            };
+          }
+        });
+
+        setWorkflowResult({
+          status: "running",
+          result: null,
+          steps: initialSteps,
+        });
+
+        let buffer = "";
+        
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const lines = buffer.split("\n\n");
+          buffer = lines.pop() || ""; // Keep incomplete line in buffer
+
+          for (const line of lines) {
+            if (line.startsWith("data: ")) {
+              try {
+                const jsonStr = line.slice(6); // Remove "data: " prefix
+                const event = JSON.parse(jsonStr);
+
+                if (event.type === "step") {
+                  // Update step in workflow result
+                  setWorkflowResult((prev) => {
+                    if (!prev) return prev;
+                    const existingIndex = prev.steps.findIndex((s) => s.id === event.data.id);
+                    const updatedSteps = [...prev.steps];
+                    
+                    if (existingIndex >= 0) {
+                      updatedSteps[existingIndex] = event.data;
+                    } else {
+                      updatedSteps.push(event.data);
+                    }
+
+                    return {
+                      ...prev,
+                      steps: updatedSteps,
+                    };
+                  });
+                } else if (event.type === "complete") {
+                  // Final result
+                  setWorkflowResult(event.data as WorkflowResponse);
+                  const synthesizerStepId =
+                    event.data.steps.find((step) => step.id === "synthesizer")?.id ??
+                    event.data.steps[0]?.id ??
+                    null;
+                  setExpandedStepId(synthesizerStepId);
+                  setLoading(false);
+                  return;
+                } else if (event.type === "error") {
+                  throw new Error(event.data.error || "Workflow execution error");
+                }
+              } catch (parseError) {
+                console.warn("Failed to parse SSE event:", parseError);
+              }
+            }
+          }
+        }
+      } else {
+        // Non-streaming response (fallback)
+        const data = (await response.json()) as WorkflowResponse;
+        setWorkflowResult(data);
+        const synthesizerStepId =
+          data.steps.find((step) => step.id === "synthesizer")?.id ??
+          data.steps[0]?.id ??
+          null;
+        setExpandedStepId(synthesizerStepId);
+      }
     } catch (submitError) {
       console.error(submitError);
       setError(
@@ -371,7 +648,6 @@ export default function BrandWorkflowRunner() {
             <UploaderCard
               id="productImageUpload"
               label="Product Image"
-              required
               accept="image/*"
               preview={productPreview}
               placeholder="Upload product"
@@ -420,60 +696,7 @@ export default function BrandWorkflowRunner() {
           <div className="w-full">
             <WorkflowGraph
               steps={
-                workflowResult?.steps || [
-                  {
-                    id: "input",
-                    status: "success",
-                    startedAt: new Date().toISOString(),
-                    endedAt: new Date().toISOString(),
-                    payload: {
-                      videoBase64,
-                      brandLogoBase64,
-                      productImageBase64,
-                      brandContext: {
-                        companyName,
-                        productName,
-                        briefPrompt: briefPrompt || undefined,
-                      },
-                    },
-                    output: null,
-                    warnings: [],
-                  },
-                  {
-                    id: "overall-critic",
-                    status: loading ? "running" : "pending",
-                    startedAt: null,
-                    endedAt: null,
-                    payload: {
-                      videoBase64,
-                      brandLogoBase64,
-                      productImageBase64,
-                      brandContext: {
-                        companyName,
-                        productName,
-                        briefPrompt: briefPrompt || undefined,
-                      },
-                    },
-                    output: null,
-                    warnings: [],
-                  },
-                  {
-                    id: "synthesizer",
-                    status: "pending",
-                    startedAt: null,
-                    endedAt: null,
-                    payload: {
-                      brandContext: {
-                        companyName,
-                        productName,
-                        briefPrompt: briefPrompt || undefined,
-                      },
-                      combinedFrom: ["overall-critic", "visual-style"],
-                    },
-                    output: null,
-                    warnings: [],
-                  },
-                ]
+                workflowResult?.steps || createPlaceholderSteps()
               }
               onNodeClick={(stepId) => {
                 // Allow clicking nodes even while loading to see current state
@@ -488,96 +711,7 @@ export default function BrandWorkflowRunner() {
             <div className="mt-6 space-y-4">
               {(() => {
                 // Find the step with the matching ID (use current steps or loading state)
-                const currentSteps = workflowResult?.steps || [
-                  {
-                    id: "input",
-                    status: "success",
-                    startedAt: new Date().toISOString(),
-                    endedAt: new Date().toISOString(),
-                    payload: {
-                      videoBase64,
-                      brandLogoBase64,
-                      productImageBase64,
-                      brandContext: {
-                        companyName,
-                        productName,
-                        briefPrompt: briefPrompt || undefined,
-                      },
-                    },
-                    output: null,
-                    warnings: [],
-                  },
-                  {
-                    id: "overall-critic",
-                    status: loading ? "running" : "pending",
-                    startedAt: null,
-                    endedAt: null,
-                    payload: {
-                      videoBase64,
-                      brandLogoBase64,
-                      productImageBase64,
-                      brandContext: {
-                        companyName,
-                        productName,
-                        briefPrompt: briefPrompt || undefined,
-                      },
-                    },
-                    output: null,
-                    warnings: [],
-                  },
-                  {
-                    id: "visual-style",
-                    status: loading ? "running" : "pending",
-                    startedAt: null,
-                    endedAt: null,
-                    payload: {
-                      videoBase64,
-                      brandLogoBase64,
-                      productImageBase64,
-                      brandContext: {
-                        companyName,
-                        productName,
-                        briefPrompt: briefPrompt || undefined,
-                      },
-                    },
-                    output: null,
-                    warnings: [],
-                  },
-                  {
-                    id: "synthesizer",
-                    status: "pending",
-                    startedAt: null,
-                    endedAt: null,
-                    payload: {
-                      brandContext: {
-                        companyName,
-                        productName,
-                        briefPrompt: briefPrompt || undefined,
-                      },
-                      combinedFrom: ["overall-critic", "visual-style"],
-                    },
-                    output: null,
-                    warnings: [],
-                  },
-                  {
-                    id: "visual-style",
-                    status: loading ? "running" : "pending",
-                    startedAt: null,
-                    endedAt: null,
-                    payload: {
-                      videoBase64,
-                      brandLogoBase64,
-                      productImageBase64,
-                      brandContext: {
-                        companyName,
-                        productName,
-                        briefPrompt: briefPrompt || undefined,
-                      },
-                    },
-                    output: null,
-                    warnings: [],
-                  },
-                ];
+                const currentSteps = workflowResult?.steps || createPlaceholderSteps();
                 
                 const step = currentSteps.find((s) => s.id === expandedStepId);
                 if (!step) return null;
@@ -687,229 +821,327 @@ export default function BrandWorkflowRunner() {
                                       </ul>
                                     </div>
                                   )}
-                                  {step.output.report && (
-                                    <div>
-                                      <p className="font-medium text-zinc-800 dark:text-zinc-100 mb-2">
+                                  {isReportOutput(step.output) && (
+                                    <div className="space-y-2">
+                                      <p className="font-medium text-zinc-800 dark:text-zinc-100">
                                         Report
                                       </p>
                                       <pre className="max-h-96 overflow-auto rounded bg-zinc-100 p-3 text-xs dark:bg-zinc-800">
                                         {JSON.stringify(step.output.report, null, 2)}
                                       </pre>
+                                      {step.output.prompt && (
+                                        <div>
+                                          <p className="font-medium text-zinc-800 dark:text-zinc-100">
+                                            Prompt
+                                          </p>
+                                          <pre className="mt-1 max-h-48 overflow-auto rounded bg-zinc-100 p-3 text-xs dark:bg-zinc-800">
+                                            {step.output.prompt}
+                                      </pre>
                                     </div>
                                   )}
                                 </div>
-                              ) : (
-                                <p className="text-sm text-zinc-500 dark:text-zinc-400">
-                                  No output available
-                                </p>
-                              )}
+                                  )}
+                                  {isFrameExtractionOutput(step.output) && (
+                                    <div className="space-y-3">
+                                      <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+                                        <div>
+                                          <span className="font-medium text-zinc-800 dark:text-zinc-100">
+                                            Frames Extracted:
+                                          </span>{" "}
+                                          {step.output.total_frames_extracted}
                             </div>
+                                        <div>
+                                          <span className="font-medium text-zinc-800 dark:text-zinc-100">
+                                            Extraction Rate:
+                                          </span>{" "}
+                                          {step.output.extraction_rate.toFixed(2)} fps
                           </div>
+                                        <div>
+                                          <span className="font-medium text-zinc-800 dark:text-zinc-100">
+                                            Video Duration:
+                                          </span>{" "}
+                                          {step.output.video_duration.toFixed(2)}s
                         </div>
+                                        <div>
+                                          <span className="font-medium text-zinc-800 dark:text-zinc-100">
+                                            Native FPS:
+                                          </span>{" "}
+                                          {step.output.video_fps.toFixed(2)}
                       </div>
                     </div>
-                  );
-              })()}
-            </div>
-          )}
-
-          {/* Overall Result Summary */}
-          {workflowResult && !expandedStepId && (
-            <div className="mt-6 rounded-2xl border border-zinc-200 bg-zinc-50/80 p-5 dark:border-zinc-800 dark:bg-zinc-900/70">
-              <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100 mb-3">
-                Overall Result
-              </h4>
-              <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-lg bg-zinc-900/90 p-3 text-xs text-zinc-50">
-                {JSON.stringify(workflowResult.result.report, null, 2)}
-              </pre>
-            </div>
-          )}
-        </section>
-      )}
-
-      {/* Legacy List View (hidden, kept for reference) */}
-      {false && workflowResult && (
-        <section className="space-y-6 rounded-3xl border border-zinc-200 bg-white p-6 shadow-lg dark:border-zinc-800 dark:bg-zinc-950 sm:p-8">
-          <div className="space-y-4">
-            {workflowResult.steps.map((step) => {
-              const isExpanded = expandedStepId === step.id;
-              const payload = step.payload || {};
-              const media: MediaDescriptor[] = [
-                {
-                  type: "video",
-                  data: payload.videoBase64,
-                  label: "Input Video",
-                },
-                {
-                  type: "image",
-                  data: payload.brandLogoBase64,
-                  label: "Brand Logo",
-                },
-                {
-                  type: "image",
-                  data: payload.productImageBase64,
-                  label: "Product Image",
-                },
-              ];
-
-              return (
-                <div
-                  key={step.id}
-                  className="overflow-hidden rounded-2xl border border-zinc-200 bg-zinc-50/60 shadow-sm transition hover:border-zinc-300 dark:border-zinc-800 dark:bg-zinc-900/50 dark:hover:border-zinc-600"
-                >
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setExpandedStepId((prev) => (prev === step.id ? null : step.id))
-                    }
-                    className="flex w-full items-center justify-between bg-white px-4 py-3 text-left dark:bg-zinc-900/80 sm:px-6"
-                  >
-                    <div>
-                      <p className="text-sm font-semibold text-zinc-900 dark:text-zinc-50">
-                        {STEP_LABELS[step.id] ?? step.id}
-                      </p>
-                      <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                        Status: {step.status}
-                      </p>
-                    </div>
-                    <svg
-                      className={`h-5 w-5 text-zinc-500 transition-transform ${
-                        isExpanded ? "rotate-180" : ""
-                      }`}
-                      fill="none"
-                      stroke="currentColor"
-                      viewBox="0 0 24 24"
-                    >
-                      <path
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                        strokeWidth={2}
-                        d="M19 9l-7 7-7-7"
-                      />
-                    </svg>
-                  </button>
-
-                  {isExpanded && (
-                    <div className="space-y-6 border-t border-zinc-200 bg-white px-4 py-5 dark:border-zinc-800 dark:bg-zinc-950 sm:px-6">
-                      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-                        <div className="space-y-4">
-                          <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
-                            Inputs
-                          </h4>
-                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                            {media.map((descriptor) => (
-                              <div key={descriptor.label}>{renderMediaPreview(descriptor)}</div>
+                                      {step.output.frames.length > 0 ? (
+                                        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                                          {step.output.frames.slice(0, 8).map((frame) => (
+                                            <figure
+                                              key={`${frame.frame_number}-${frame.timestamp}`}
+                                              className="space-y-2"
+                                            >
+                                              <img
+                                                src={frame.image_base64}
+                                                alt={`Frame ${frame.frame_number} at ${frame.timestamp}s`}
+                                                className="h-32 w-full rounded-lg object-cover"
+                                              />
+                                              <figcaption className="text-xs text-zinc-500 dark:text-zinc-400">
+                                                Frame {frame.frame_number} · {frame.timestamp}s
+                                              </figcaption>
+                                            </figure>
                             ))}
                           </div>
-                          {payload.brandContext && (
-                            <div className="rounded-xl border border-zinc-200 bg-zinc-50/70 p-4 text-sm text-zinc-700 dark:border-zinc-800 dark:bg-zinc-900/70 dark:text-zinc-200">
-                              <p className="font-medium text-zinc-800 dark:text-zinc-100">
-                                Brand Context
-                              </p>
-                              <ul className="mt-2 space-y-1">
-                                <li>
-                                  <strong>Company:</strong>{" "}
-                                  {payload.brandContext.companyName}
-                                </li>
-                                <li>
-                                  <strong>Product:</strong>{" "}
-                                  {payload.brandContext.productName}
-                                </li>
-                                {payload.brandContext.briefPrompt && (
-                                  <li>
-                                    <strong>Brief:</strong>{" "}
-                                    {payload.brandContext.briefPrompt}
-                                  </li>
-                                )}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-
-                        <div className="space-y-4">
-                          <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
-                            Output
-                          </h4>
-                          <div className="rounded-xl border border-zinc-200 bg-zinc-50/70 p-4 dark:border-zinc-800 dark:bg-zinc-900/70">
-                            {step.output ? (
-                              <div className="space-y-3 text-sm text-zinc-700 dark:text-zinc-200">
-                                <div>
-                                  <p className="font-medium text-zinc-800 dark:text-zinc-100">
-                                    Model
-                                  </p>
-                                  <p>{step.output.model}</p>
-                                </div>
-                                {step.output.warnings?.length > 0 && (
-                                  <div>
-                                    <p className="font-medium text-zinc-800 dark:text-zinc-100">
-                                      Warnings
-                                    </p>
-                                    <ul className="mt-1 list-disc space-y-1 pl-4">
-                                      {step.output.warnings.map((warning, index) => (
-                                        <li key={index}>{warning}</li>
-                                      ))}
-                                    </ul>
+                                      ) : (
+                                        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                                          No frames were extracted.
+                                        </p>
+                                      )}
+                                      {step.output.frames.length > 8 && (
+                                        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                                          Showing first 8 of {step.output.frames.length} frames.
+                                        </p>
+                                      )}
                                   </div>
                                 )}
-                                <details className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-                                  <summary className="cursor-pointer text-sm font-medium text-zinc-800 dark:text-zinc-200">
-                                    Structured Report
-                                  </summary>
-                                  <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-lg bg-zinc-900/90 p-3 text-xs text-zinc-50">
-                                    {JSON.stringify(step.output.report, null, 2)}
-                                  </pre>
-                                </details>
-                                <details className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-                                  <summary className="cursor-pointer text-sm font-medium text-zinc-800 dark:text-zinc-200">
-                                    Prompt Sent to Gemini
-                                  </summary>
-                                  <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-lg bg-zinc-900/90 p-3 text-xs text-zinc-50">
-                                    {step.output.prompt}
-                                  </pre>
-                                </details>
-                                {step.output.rawText && (
-                                  <details className="rounded-lg border border-zinc-200 bg-white p-3 dark:border-zinc-800 dark:bg-zinc-950">
-                                    <summary className="cursor-pointer text-sm font-medium text-zinc-800 dark:text-zinc-200">
-                                      Raw Model Response
-                                    </summary>
-                                    <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-lg bg-zinc-900/90 p-3 text-xs text-zinc-50">
-                                      {step.output.rawText}
-                                    </pre>
-                                  </details>
-                                )}
+                                  {isLogoDetectionOutput(step.output) && (
+                                    <div className="space-y-4">
+                                      <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+                                        <div>
+                                          <span className="font-medium text-zinc-800 dark:text-zinc-100">
+                                            Logo Found:
+                                          </span>{" "}
+                                          {step.output.logo_found ? "Yes" : "No"}
+                                        </div>
+                                        {step.output.method_used && (
+                                          <div>
+                                            <span className="font-medium text-zinc-800 dark:text-zinc-100">
+                                              Method:
+                                            </span>{" "}
+                                            {step.output.method_used}
+                                          </div>
+                                        )}
+                                        {step.output.notes && (
+                                          <div className="sm:col-span-2">
+                                            <span className="font-medium text-zinc-800 dark:text-zinc-100">
+                                              Notes:
+                                            </span>{" "}
+                                            {step.output.notes}
+                                          </div>
+                                        )}
+                                      </div>
+                                      {step.output.detections.length > 0 ? (
+                                        <div className="space-y-4">
+                                          <div className="text-xs text-zinc-500 dark:text-zinc-400">
+                                            Showing up to the first 6 detections.
+                                          </div>
+                                          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                                            {step.output.detections.slice(0, 6).map((detection) => {
+                                              const confidencePct = Math.round(
+                                                Math.max(0, Math.min(1, detection.confidence)) * 100,
+                                              );
+                                              return (
+                                              <div
+                                                key={`${detection.frame_number}-${detection.timestamp}-${detection.method}`}
+                                                className="rounded-lg border border-zinc-200 bg-white p-3 shadow-sm dark:border-zinc-700 dark:bg-zinc-900/70"
+                                              >
+                                                {detection.crop_image_base64 ? (
+                                                  <img
+                                                    src={detection.crop_image_base64}
+                                                    alt={`Logo detection frame ${detection.frame_number}`}
+                                                    className="mb-3 h-32 w-full rounded-md object-cover"
+                                                  />
+                                                ) : (
+                                                  <div className="mb-3 flex h-32 w-full items-center justify-center rounded-md border border-dashed border-zinc-300 text-xs text-zinc-500 dark:border-zinc-700 dark:text-zinc-400">
+                                                    No crop available
+                                                  </div>
+                                                )}
+                                                <dl className="space-y-1 text-xs text-zinc-600 dark:text-zinc-300">
+                                                  <div className="flex justify-between">
+                                                    <dt className="font-medium">Frame</dt>
+                                                    <dd>{detection.frame_number}</dd>
+                                                  </div>
+                                                  <div className="flex justify-between">
+                                                    <dt className="font-medium">Timestamp</dt>
+                                                    <dd>{detection.timestamp}s</dd>
+                                                  </div>
+                                                  <div className="flex justify-between">
+                                                    <dt className="font-medium">Method</dt>
+                                                    <dd>{detection.method}</dd>
+                                                  </div>
+                                                  <div className="flex justify-between">
+                                                    <dt className="font-medium">Confidence</dt>
+                                                    <dd>{confidencePct}%</dd>
+                                                  </div>
+                                                  {detection.bounding_box && (
+                                                    <div>
+                                                      <dt className="font-medium">Bounding Box</dt>
+                                                      <dd>
+                                                        x:{detection.bounding_box.x.toFixed(2)}, y:
+                                                        {detection.bounding_box.y.toFixed(2)}, w:
+                                                        {detection.bounding_box.width.toFixed(2)}, h:
+                                                        {detection.bounding_box.height.toFixed(2)}
+                                                      </dd>
+                                                    </div>
+                                                  )}
+                                                  {detection.notes && (
+                                                    <div>
+                                                      <dt className="font-medium">Notes</dt>
+                                                      <dd>{detection.notes}</dd>
+                                                    </div>
+                                                  )}
+                                                </dl>
+                                              </div>
+                                              );
+                                            })}
+                                          </div>
+                                          {step.output.detections.length > 6 && (
+                                            <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                                              {step.output.detections.length - 6} additional detections not shown.
+                                            </p>
+                                          )}
+                                        </div>
+                                      ) : (
+                                        <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                                          No logo detections were returned.
+                                        </p>
+                                      )}
+                                    </div>
+                                  )}
+                                  {isColorHarmonyOutput(step.output) && (
+                                    <div className="space-y-4">
+                                      <div className="grid grid-cols-1 gap-2 text-xs sm:grid-cols-2">
+                                        <div>
+                                          <span className="font-medium text-zinc-800 dark:text-zinc-100">
+                                            Overall Score:
+                                          </span>{" "}
+                                          {(step.output.overall_score * 100).toFixed(1)}%
+                                        </div>
+                                        <div>
+                                          <span className="font-medium text-zinc-800 dark:text-zinc-100">
+                                            Color Alignment:
+                                          </span>{" "}
+                                          {(step.output.color_alignment_score * 100).toFixed(1)}%
+                                        </div>
+                                      </div>
+                                      
+                                      <div className="space-y-3">
+                                        {step.output.brand_logo_colors?.dominant_colors && (
+                                          <div>
+                                            <p className="mb-2 text-sm font-medium text-zinc-800 dark:text-zinc-100">
+                                              Brand Logo Colors
+                                            </p>
+                                            <div className="flex flex-wrap gap-2">
+                                              {step.output.brand_logo_colors.dominant_colors.map((color, idx) => (
+                                                <div
+                                                  key={idx}
+                                                  className="flex items-center gap-2 rounded-lg border border-zinc-300 px-3 py-1.5 dark:border-zinc-700"
+                                                >
+                                                  <div
+                                                    className="h-6 w-6 rounded"
+                                                    style={{ backgroundColor: color }}
+                                                  />
+                                                  <span className="text-xs font-mono">{color}</span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                        
+                                        {step.output.logo_colors?.dominant_colors && step.output.logo_colors.dominant_colors.length > 0 && (
+                                          <div>
+                                            <p className="mb-2 text-sm font-medium text-zinc-800 dark:text-zinc-100">
+                                              Detected Logo Colors
+                                            </p>
+                                            <div className="flex flex-wrap gap-2">
+                                              {step.output.logo_colors.dominant_colors.map((color, idx) => (
+                                                <div
+                                                  key={idx}
+                                                  className="flex items-center gap-2 rounded-lg border border-zinc-300 px-3 py-1.5 dark:border-zinc-700"
+                                                >
+                                                  <div
+                                                    className="h-6 w-6 rounded"
+                                                    style={{ backgroundColor: color }}
+                                                  />
+                                                  <span className="text-xs font-mono">{color}</span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                        
+                                        {step.output.frame_colors?.dominant_colors && step.output.frame_colors.dominant_colors.length > 0 && (
+                                          <div>
+                                            <p className="mb-2 text-sm font-medium text-zinc-800 dark:text-zinc-100">
+                                              Frame Colors
+                                            </p>
+                                            <div className="flex flex-wrap gap-2">
+                                              {step.output.frame_colors.dominant_colors.map((color, idx) => (
+                                                <div
+                                                  key={idx}
+                                                  className="flex items-center gap-2 rounded-lg border border-zinc-300 px-3 py-1.5 dark:border-zinc-700"
+                                                >
+                                                  <div
+                                                    className="h-6 w-6 rounded"
+                                                    style={{ backgroundColor: color }}
+                                                  />
+                                                  <span className="text-xs font-mono">{color}</span>
+                                                </div>
+                                              ))}
+                                            </div>
+                                          </div>
+                                        )}
+                                      </div>
+                                      
+                                      <div>
+                                        <p className="mb-2 text-sm font-medium text-zinc-800 dark:text-zinc-100">
+                                          Analysis
+                                        </p>
+                                        <p className="text-sm text-zinc-700 dark:text-zinc-300">
+                                          {step.output.analysis}
+                                        </p>
+                                      </div>
+                                      
+                                      {step.output.recommendations.length > 0 && (
+                                        <div>
+                                          <p className="mb-2 text-sm font-medium text-zinc-800 dark:text-zinc-100">
+                                            Recommendations
+                                          </p>
+                                          <ul className="list-disc space-y-1 pl-4 text-sm text-zinc-700 dark:text-zinc-300">
+                                            {step.output.recommendations.map((rec, idx) => (
+                                              <li key={idx}>{rec}</li>
+                                            ))}
+                                          </ul>
+                                        </div>
+                                      )}
+                                    </div>
+                                  )}
                               </div>
                             ) : (
-                              <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                                No output captured for this step.
+                                <p className="text-sm text-zinc-500 dark:text-zinc-400">
+                                  No output available
                               </p>
                             )}
                           </div>
-
-                          <div className="rounded-xl border border-zinc-200 bg-white p-4 text-xs text-zinc-500 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
-                            <p>
-                              <strong>Started:</strong> {formatDate(step.startedAt)}
-                            </p>
-                            <p>
-                              <strong>Ended:</strong> {formatDate(step.endedAt)}
-                            </p>
                           </div>
                         </div>
                       </div>
-                    </div>
-                  )}
                 </div>
               );
-            })}
+              })()}
           </div>
+          )}
 
-          <div className="rounded-2xl border border-zinc-200 bg-zinc-50/80 p-5 dark:border-zinc-800 dark:bg-zinc-900/70">
-            <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">
+          {/* Overall Result Summary */}
+          {workflowResult && !expandedStepId && workflowResult.result && (
+            <div className="mt-6 rounded-2xl border border-zinc-200 bg-zinc-50/80 p-5 dark:border-zinc-800 dark:bg-zinc-900/70">
+              <h4 className="text-sm font-semibold text-zinc-800 dark:text-zinc-100 mb-3">
               Overall Result
             </h4>
-            <pre className="mt-3 max-h-80 overflow-auto whitespace-pre-wrap rounded-lg bg-zinc-900/90 p-3 text-xs text-zinc-50">
-              {JSON.stringify(workflowResult.result.report, null, 2)}
+              <pre className="max-h-80 overflow-auto whitespace-pre-wrap rounded-lg bg-zinc-900/90 p-3 text-xs text-zinc-50">
+              {JSON.stringify(
+                workflowResult.result.report || workflowResult.result,
+                null,
+                2
+              )}
             </pre>
           </div>
+          )}
         </section>
       )}
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from typing import Any, Dict
 
 from google.genai.types import GenerateContentResponse
@@ -17,6 +18,14 @@ from ..schemas.critique import SynthesizerRequest, SynthesizerResult
 from ..services.gemini import get_genai_client
 
 logger = logging.getLogger(__name__)
+
+
+USE_DUMMY_SYNTHESIZER = os.getenv("USE_DUMMY_SYNTHESIZER", "true").lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 
 def _extract_response_text(response: GenerateContentResponse) -> str:
@@ -117,6 +126,39 @@ def _build_prompt(request: SynthesizerRequest) -> str:
 
 def run_synthesizer(request: SynthesizerRequest) -> SynthesizerResult:
     """Execute the synthesizer agent and return a structured result."""
+    if USE_DUMMY_SYNTHESIZER:
+        brand = request.brand_context
+        brand_description = f"{brand.company_name}'s {brand.product_name}".strip()
+
+        report = {
+            "combinedSummary": (
+                "Dummy synthesis generated – real Gemini call skipped to save credits."
+            ),
+            "brandAlignment": {
+                "score": 0.5,
+                "narrative": (
+                    f"No authentic scoring performed for {brand_description} while dummy mode is active."
+                ),
+            },
+            "visualIdentity": {
+                "score": 0.5,
+                "narrative": "Visual identity analysis not executed.",
+            },
+            "keyInsights": ["Placeholder insight only."],
+            "risks": ["Real synthesis skipped."],
+            "recommendations": [
+                "Disable USE_DUMMY_SYNTHESIZER to run the actual Gemini synthesizer.",
+            ],
+        }
+
+        return SynthesizerResult(
+            report=report,
+            prompt="DUMMY_MODE: Synthesizer agent skipped",
+            warnings=[
+                "USE_DUMMY_SYNTHESIZER is enabled – no Gemini tokens consumed for synthesis."
+            ],
+        )
+
     client = get_genai_client()
 
     prompt = _build_prompt(request)
